@@ -1,4 +1,4 @@
-# 🚀 Vaclab Kubernetes Plugins
+# Vaclab Kubernetes Plugins
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.11.3+-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
@@ -38,7 +38,7 @@ Standard Kubernetes networking lacks strict bandwidth reservation mechanisms, ma
 
 ---
 
-## 🔧 Bandwidth Operator
+## Bandwidth Operator
 
 **Location:** [`bandwidth-operator/`](./bandwidth-operator/)
 
@@ -105,7 +105,7 @@ kubectl apply -f install.bw.operator.yaml
    kubectl apply -f dist/install.yaml
    ```
 
-### 🔍 Custom Resource Definition
+### Custom Resource Definition
 
 The `Bandwidth` CRD defines node network capacity and current allocations:
 
@@ -127,7 +127,7 @@ spec:
 
 **Example:** See [`bandwidth-operator/config/samples/networking_v1_bandwidth.yaml`](./bandwidth-operator/config/samples/networking_v1_bandwidth.yaml)
 
-### 🏷️ Pod Annotations
+### Pod Annotations
 
 Pods request bandwidth using annotations (this will be enforced later at veth level by the CNI in use):
 
