@@ -8,17 +8,13 @@
 
 ## Overview
 
-This repository provides Kubernetes extensions designed to enable **deterministic bandwidth management** and **intelligent scheduling** in research and laboratory environments where network reproducibility is critical. 
-
-### Motivation
-
 In the Vaclab environment, traditional Kubernetes scheduling cannot guarantee:
 - **Bandwidth accountability**: tracking actual network resource usage per node
 - **Strict bandwidth enforcement**: preventing oversubscription of network links
-- **Scheduling-aware bandwidth allocation**: rejecting pod placement when bandwidth is unavailable
-- **Pod locality optimization**: co-locating related pods (StatefulSets, Deployments) on the same physical node to leverage local virtual bridges
+- **Bandwidth-aware  scheduling**: rejecting pod placement when bandwidth is unavailable
+- **Pod locality optimization**: Always try to co-locate related pods (StatefulSets, Deployments) on the same physical node to leverage local virtual bridges
 
-Standard Kubernetes networking lacks strict bandwidth reservation mechanisms, making experiments **non-reproducible** due to network fluctuations. Our goal here is to propose a clean workaround to this problem.
+Unlike CPU and RAM, Kubernetes doesn't treat bandwidth as a schedulable resource. Therefore, it lacks guaranteed bandwidth reservation mechanisms, making experiments **non-reproducible** due to network fluctuations. Our goal here is to propose a clean workaround to this problem.
 
 ---
 
@@ -26,26 +22,26 @@ Standard Kubernetes networking lacks strict bandwidth reservation mechanisms, ma
 
 ### Components
 
-1. **[Bandwidth Operator](#-bandwidth-operator)** ([`bandwidth-operator/`](./bandwidth-operator/))
+1. **[Vaclab Bandwidth Operator](#-bandwidth-operator)** ([`bandwidth-operator/`](./bandwidth-operator/))
    - Custom Resource Definition (CRD) and controller
    - Per-node bandwidth tracking and enforcement
    - Pod lifecycle monitoring and bandwidth accounting
 
-2. **[Bandwidth-Aware Scheduler](#-bandwidth-aware-scheduler-plugin)** (WIP)
+2. **[Vaclab Bandwidth-Aware Scheduler](#-bandwidth-aware-scheduler-plugin)** (WIP)
    - Custom scheduler plugins for the Kubernetes scheduler
    - Node filtering based on available bandwidth
    - Locality-aware scheduling for grouped workloads
 
 ---
 
-## Bandwidth Operator
-The Bandwidth Operator introduces a new Kubernetes Custom Resource called `Bandwidth` that represents the network capacity of each cluster node. It monitors pod lifecycle events and maintains real-time bandwidth allocation state.
+## Vaclab Bandwidth Operator
+The Vaclab Bandwidth Operator introduces a new Kubernetes Custom Resource named `Bandwidth` that represents the network capacity of each cluster node. It monitors pod lifecycle events and maintains real-time bandwidth allocation state.
 
 ### Key Features
 
-- **Dual Bandwidth Tracking:**
-  - **Local Bandwidth** — Virtual switch capacity (e.g., OVS) for intra-node traffic
-  - **Network Bandwidth** — Physical NIC capacity (egress/ingress) for inter-node traffic
+- **Intra/Inter node Bandwidth Tracking:**
+  - **Local Bandwidth**: Virtual switch capacity (e.g., OVS) for intra-node traffic
+  - **Network Bandwidth**: Physical capacity (egress/ingress) for inter-node traffic through primary NIC.
 
 - **Automatic Resource Management:**
   - Creates `Bandwidth` CRs for each node automatically
