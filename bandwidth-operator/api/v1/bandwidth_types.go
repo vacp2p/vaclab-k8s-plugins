@@ -80,8 +80,6 @@ type Capacity struct {
 
 // BandwidthSpec defines the desired state of Bandwidth
 type BandwidthSpec struct {
-	// A human-readable name for this bandwidth resource
-	Name string `json:"name"`
 	// The node this bandwidth resource applies to
 	Node string `json:"node"`
 	// The max capacity defined in this bandwidth resource

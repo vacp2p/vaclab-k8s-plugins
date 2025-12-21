@@ -116,9 +116,6 @@ spec:
                     - ulMbps
                     type: object
                 type: object
-              name:
-                description: A human-readable name for this bandwidth resource
-                type: string
               node:
                 description: The node this bandwidth resource applies to
                 type: string
@@ -169,7 +166,6 @@ spec:
                 type: string
             required:
             - capacity
-            - name
             - node
             type: object
           status:
