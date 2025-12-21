@@ -39,9 +39,6 @@ Standard Kubernetes networking lacks strict bandwidth reservation mechanisms, ma
 ---
 
 ## Bandwidth Operator
-
-**Location:** [`bandwidth-operator/`](./bandwidth-operator/)
-
 The Bandwidth Operator introduces a new Kubernetes Custom Resource called `Bandwidth` that represents the network capacity of each cluster node. It monitors pod lifecycle events and maintains real-time bandwidth allocation state.
 
 ### Key Features
@@ -90,8 +87,6 @@ kubectl apply -f install.bw.operator.yaml
    ```bash
    make docker-build docker-push IMG=<your-registry>/vaclab-bandwidth-operator:latest
    ```
-   
-   Replace `<your-registry>` with your container registry (e.g., `katakuri100`, `docker.io/myuser`, `gcr.io/myproject`).
 
 3. **Generate the installer manifest:**
    ```bash
@@ -124,8 +119,10 @@ spec:
       dlMbps: 1000   # Physical NIC ingress capacity
   reservations: []   # List of pod bandwidth reservations
 ```
-
-**Example:** See [`bandwidth-operator/config/samples/networking_v1_bandwidth.yaml`](./bandwidth-operator/config/samples/networking_v1_bandwidth.yaml)
+config/crd/bases
+/networking.vaclab.org_bandwidths.yaml
+**Example:** See [`bandwidth-operator/config/crd/bases/networking.vaclab.org_bandwidths.yaml`](./bandwidth-operator/config/crd/bases
+/networking.vaclab.org_bandwidths.yaml)
 
 ### Pod Annotations
 
