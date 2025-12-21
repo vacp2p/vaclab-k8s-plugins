@@ -1,0 +1,9 @@
+apiVersion: networking.vaclab.org/v1
+kind: Bandwidth
+metadata:
+  labels:
+    app.kubernetes.io/name: bandwidth-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: bandwidth-sample
+spec:
+  # TODO(user): Add fields here
