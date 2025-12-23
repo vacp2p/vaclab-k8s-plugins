@@ -1,0 +1,693 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+    control-plane: controller-manager
+  name: bandwidth-operator-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: bandwidths.networking.vaclab.org
+spec:
+  group: networking.vaclab.org
+  names:
+    kind: Bandwidth
+    listKind: BandwidthList
+    plural: bandwidths
+    singular: bandwidth
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.node
+      name: Node
+      type: string
+    - jsonPath: .spec.capacity.network.ulMbps
+      name: UL
+      type: integer
+    - jsonPath: .spec.capacity.network.dlMbps
+      name: DL
+      type: integer
+    - jsonPath: .status.used.network.ulMbps
+      name: UsedUL
+      type: integer
+    - jsonPath: .status.used.network.dlMbps
+      name: UsedDL
+      type: integer
+    - jsonPath: .status.capacity.local.ulMbps
+      name: LoUL
+      type: integer
+    - jsonPath: .status.capacity.local.dlMbps
+      name: LoDL
+      type: integer
+    - jsonPath: .status.used.local.ulMbps
+      name: UsedLoUL
+      type: integer
+    - jsonPath: .status.used.local.dlMbps
+      name: UsedLoDL
+      type: integer
+    - jsonPath: .status.status
+      name: State
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: Bandwidth is the Schema for the bandwidths API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Bandwidth
+            properties:
+              capacity:
+                description: The max capacity defined in this bandwidth resource
+                properties:
+                  local:
+                    description: local datapath (ovs/linux-bridge) bandwidth within
+                      the host
+                    properties:
+                      dlMbps:
+                        description: Downlink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                      ulMbps:
+                        description: Uplink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                    required:
+                    - dlMbps
+                    - ulMbps
+                    type: object
+                  network:
+                    description: network bandwidth (via physical ethernet interface)
+                    properties:
+                      dlMbps:
+                        description: Downlink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                      ulMbps:
+                        description: Uplink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                    required:
+                    - dlMbps
+                    - ulMbps
+                    type: object
+                type: object
+              name:
+                description: A human-readable name for this bandwidth resource
+                type: string
+              node:
+                description: The node this bandwidth resource applies to
+                type: string
+              requests:
+                description: List of Bandwidth requests
+                items:
+                  properties:
+                    bandwidth:
+                      description: requested bandwidth
+                      properties:
+                        dlMbps:
+                          description: Downlink bandwidth in Mbps
+                          format: int64
+                          type: integer
+                        ulMbps:
+                          description: Uplink bandwidth in Mbps
+                          format: int64
+                          type: integer
+                      required:
+                      - dlMbps
+                      - ulMbps
+                      type: object
+                    linkLocal:
+                      description: If the request is for local datapath
+                      type: boolean
+                    namespace:
+                      description: namespace
+                      type: string
+                    podName:
+                      description: pod name
+                      type: string
+                    podUid:
+                      description: pod uid
+                      type: string
+                  required:
+                  - podUid
+                  type: object
+                type: array
+              status:
+                description: The current status of this bandwidth resource
+                enum:
+                - Created
+                - Creating
+                - Error
+                - Deleting
+                - Deleted
+                - None
+                type: string
+            required:
+            - capacity
+            - name
+            - node
+            type: object
+          status:
+            description: status defines the observed state of Bandwidth
+            properties:
+              capacity:
+                description: The max capacity defined in this bandwidth resource
+                properties:
+                  local:
+                    description: local datapath (ovs/linux-bridge) bandwidth within
+                      the host
+                    properties:
+                      dlMbps:
+                        description: Downlink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                      ulMbps:
+                        description: Uplink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                    required:
+                    - dlMbps
+                    - ulMbps
+                    type: object
+                  network:
+                    description: network bandwidth (via physical ethernet interface)
+                    properties:
+                      dlMbps:
+                        description: Downlink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                      ulMbps:
+                        description: Uplink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                    required:
+                    - dlMbps
+                    - ulMbps
+                    type: object
+                type: object
+              errorReason:
+                type: string
+              remaining:
+                description: Remaining bandwidth
+                properties:
+                  local:
+                    description: local datapath (ovs/linux-bridge) bandwidth within
+                      the host
+                    properties:
+                      dlMbps:
+                        description: Downlink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                      ulMbps:
+                        description: Uplink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                    required:
+                    - dlMbps
+                    - ulMbps
+                    type: object
+                  network:
+                    description: network bandwidth (via physical ethernet interface)
+                    properties:
+                      dlMbps:
+                        description: Downlink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                      ulMbps:
+                        description: Uplink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                    required:
+                    - dlMbps
+                    - ulMbps
+                    type: object
+                type: object
+              reservations:
+                description: List of current reservations
+                items:
+                  properties:
+                    bandwidth:
+                      description: reserved bandwidth
+                      properties:
+                        local:
+                          description: local datapath (ovs/linux-bridge) bandwidth
+                            within the host
+                          properties:
+                            dlMbps:
+                              description: Downlink bandwidth in Mbps
+                              format: int64
+                              type: integer
+                            ulMbps:
+                              description: Uplink bandwidth in Mbps
+                              format: int64
+                              type: integer
+                          required:
+                          - dlMbps
+                          - ulMbps
+                          type: object
+                        network:
+                          description: network bandwidth (via physical ethernet interface)
+                          properties:
+                            dlMbps:
+                              description: Downlink bandwidth in Mbps
+                              format: int64
+                              type: integer
+                            ulMbps:
+                              description: Uplink bandwidth in Mbps
+                              format: int64
+                              type: integer
+                          required:
+                          - dlMbps
+                          - ulMbps
+                          type: object
+                      type: object
+                    deploymentName:
+                      description: deployment name
+                      type: string
+                    deploymentType:
+                      description: deployment type statefulset/job/deployment/others
+                      type: string
+                    deploymentUid:
+                      description: Deployment uid
+                      type: string
+                    ip:
+                      description: pod ip
+                      type: string
+                    namespace:
+                      description: namespace
+                      type: string
+                    podName:
+                      description: pod name
+                      type: string
+                    podUid:
+                      description: pod uid
+                      type: string
+                  required:
+                  - bandwidth
+                  - namespace
+                  - podUid
+                  type: object
+                type: array
+              status:
+                enum:
+                - Created
+                - Creating
+                - Error
+                - Deleting
+                - Deleted
+                - None
+                type: string
+              updatedAt:
+                description: Last updated time
+                format: date-time
+                type: string
+              used:
+                description: Consumed bandwidth
+                properties:
+                  local:
+                    description: local datapath (ovs/linux-bridge) bandwidth within
+                      the host
+                    properties:
+                      dlMbps:
+                        description: Downlink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                      ulMbps:
+                        description: Uplink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                    required:
+                    - dlMbps
+                    - ulMbps
+                    type: object
+                  network:
+                    description: network bandwidth (via physical ethernet interface)
+                    properties:
+                      dlMbps:
+                        description: Downlink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                      ulMbps:
+                        description: Uplink bandwidth in Mbps
+                        format: int64
+                        type: integer
+                    required:
+                    - dlMbps
+                    - ulMbps
+                    type: object
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+  name: bandwidth-operator-controller-manager
+  namespace: bandwidth-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+  name: bandwidth-operator-leader-election-role
+  namespace: bandwidth-operator-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+  name: bandwidth-operator-bandwidth-admin-role
+rules:
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths
+  verbs:
+  - '*'
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+  name: bandwidth-operator-bandwidth-editor-role
+rules:
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+  name: bandwidth-operator-bandwidth-viewer-role
+rules:
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bandwidth-operator-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - networking.vaclab.org
+  resources:
+  - bandwidths/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bandwidth-operator-metrics-auth-role
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bandwidth-operator-metrics-reader
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+  name: bandwidth-operator-leader-election-rolebinding
+  namespace: bandwidth-operator-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bandwidth-operator-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: bandwidth-operator-controller-manager
+  namespace: bandwidth-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+  name: bandwidth-operator-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bandwidth-operator-manager-role
+subjects:
+- kind: ServiceAccount
+  name: bandwidth-operator-controller-manager
+  namespace: bandwidth-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bandwidth-operator-metrics-auth-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bandwidth-operator-metrics-auth-role
+subjects:
+- kind: ServiceAccount
+  name: bandwidth-operator-controller-manager
+  namespace: bandwidth-operator-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+    control-plane: controller-manager
+  name: bandwidth-operator-controller-manager-metrics-service
+  namespace: bandwidth-operator-system
+spec:
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app.kubernetes.io/name: bandwidth-operator
+    control-plane: controller-manager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: bandwidth-operator
+    control-plane: controller-manager
+  name: bandwidth-operator-controller-manager
+  namespace: bandwidth-operator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bandwidth-operator
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        app.kubernetes.io/name: bandwidth-operator
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --metrics-bind-address=:8443
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        command:
+        - /manager
+        image: controller:latest
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports: []
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts: []
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: bandwidth-operator-controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes: []

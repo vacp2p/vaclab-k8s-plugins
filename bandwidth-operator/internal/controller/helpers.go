@@ -1,0 +1,153 @@
+package controller
+
+import (
+	"context"
+	"time"
+
+	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+)
+
+func (r *BandwidthReconciler) generateEvent(event networkingv1.EventVaclabNodeBandwidth, bandwidthResource *networkingv1.Bandwidth) {
+	var message string
+
+	switch event {
+	case networkingv1.EventVaclabNodeBandwidthCreated:
+		message = "Created vaclab node bandwidth resource"
+	case networkingv1.EventVaclabNodeBandwidthCreating:
+		message = "Creating vaclab node bandwidth resource"
+	case networkingv1.EventVaclabNodeBandwidthDeleted:
+		message = "Deleted vaclab node bandwidth resource"
+	case networkingv1.EventVaclabNodeBandwidthFailed:
+		message = "Error on vaclab node bandwidth resource:" + bandwidthResource.Status.ErrorReason
+	case networkingv1.EventVaclabNodeBandwidthDeleting:
+		// should not be reached
+		message = "Deleting vaclab node bandwidth resource"
+	default:
+		message = "Unknown event"
+	}
+
+	if event == networkingv1.EventVaclabNodeBandwidthDeleted {
+		// should not be reached
+		r.Recorder.Event(bandwidthResource, "Normal", string(event), "Deleted:"+message)
+		return
+	}
+
+	r.Recorder.Event(bandwidthResource, "Normal", string(event), string(bandwidthResource.Status.Status)+":"+message+":"+bandwidthResource.Name)
+}
+
+func (r *BandwidthReconciler) setDefaultBandwidthValues(bandwidth *networkingv1.Bandwidth) {
+	if bandwidth.Spec.Capacity.Local.UlMbps == 0 {
+		bandwidth.Spec.Capacity.Local.UlMbps = DEFAULT_LOCAL_UL_BANDWIDTH_MBPS
+	}
+	if bandwidth.Spec.Capacity.Local.DlMbps == 0 {
+		bandwidth.Spec.Capacity.Local.DlMbps = DEFAULT_LOCAL_DL_BANDWIDTH_MBPS
+	}
+	if bandwidth.Spec.Capacity.Network.UlMbps == 0 {
+		bandwidth.Spec.Capacity.Network.UlMbps = DEFAULT_NETWORK_UL_BANDWIDTH_MBPS
+	}
+	if bandwidth.Spec.Capacity.Network.DlMbps == 0 {
+		bandwidth.Spec.Capacity.Network.DlMbps = DEFAULT_NETWORK_DL_BANDWIDTH_MBPS
+	}
+}
+
+func (r *BandwidthReconciler) UpdateBandwidthStatus(ctx context.Context, bandwidth *networkingv1.Bandwidth) error {
+	bandwidth.Status.UpdatedAt = metav1.NewTime(time.Now())
+	return r.Status().Update(ctx, bandwidth)
+}
+
+func GetBandwidthFromAnnotation(pod corev1.Pod) (ul int64, dl int64) {
+	egress, _ := pod.Annotations["kubernetes.io/egress-bandwidth"]
+	ingress, _ := pod.Annotations["kubernetes.io/ingress-bandwidth"]
+	if qEgress, err := resource.ParseQuantity(egress); err == nil {
+		ul = qEgress.Value() / (1000000) // convert from bytes to megabits
+	}
+	if qIngress, err := resource.ParseQuantity(ingress); err == nil {
+		dl = qIngress.Value() / (1000000) // convert from bytes to megabits
+	}
+	return
+
+}
+
+// WorkloadRef is a small struct to transport workload metadata
+type WorkloadRef struct {
+	Kind string
+	Name string
+	UID  string
+}
+
+func GetWorkloadRefFromPod(pod *corev1.Pod) WorkloadRef {
+	owners := pod.GetOwnerReferences()
+	if len(owners) == 0 {
+		// Pod created directly (no controller)
+		return WorkloadRef{
+			Kind: "Pod",
+			Name: pod.GetName(),
+			UID:  string(pod.GetUID()),
+		}
+	}
+
+	// Prefer the controller owner if present
+	for i := 0; i < len(owners); i++ {
+		if owners[i].Controller != nil && *owners[i].Controller {
+			return WorkloadRef{
+				Kind: owners[i].Kind,
+				Name: owners[i].Name,
+				UID:  string(owners[i].UID),
+			}
+		}
+	}
+
+	// Fallback: first owner ref
+	return WorkloadRef{
+		Kind: owners[0].Kind,
+		Name: owners[0].Name,
+		UID:  string(owners[0].UID),
+	}
+}
+
+func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Context) error {
+	var nodes corev1.NodeList
+	if err := r.List(ctx, &nodes); err != nil {
+		return err
+	}
+
+	for _, n := range nodes.Items {
+		nodeName := n.Name
+
+		// If BW already exists, skip
+		var existing networkingv1.Bandwidth
+		if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &existing); err == nil {
+			continue
+		} else if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+
+		// Create BW for node
+		bw := networkingv1.Bandwidth{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+			Spec: networkingv1.BandwidthSpec{
+				Node: nodeName,
+			},
+		}
+
+		r.setDefaultBandwidthValues(&bw)
+		controllerutil.AddFinalizer(&bw, FinalizerName)
+		if err := r.Create(ctx, &bw); err != nil {
+			// tolerate race
+			if apierrors.IsAlreadyExists(err) {
+				continue
+			}
+			return err
+		}
+	}
+
+	return nil
+}
