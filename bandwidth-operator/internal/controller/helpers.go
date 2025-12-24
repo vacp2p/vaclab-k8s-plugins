@@ -7,7 +7,7 @@ import (
 
 	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -59,7 +59,12 @@ func (r *BandwidthReconciler) setDefaultBandwidthValues(bandwidth *networkingv1.
 
 func (r *BandwidthReconciler) UpdateBandwidthStatus(ctx context.Context, bandwidth *networkingv1.Bandwidth) error {
 	bandwidth.Status.UpdatedAt = metav1.NewTime(time.Now())
-	return r.Status().Update(ctx, bandwidth)
+	err := r.Status().Update(ctx, bandwidth)
+	// If conflict, return without error to allow retry
+	if errors.IsConflict(err) {
+		return nil
+	}
+	return err
 }
 
 func (r *BandwidthReconciler) GetBandwidthFromAnnotation(pod corev1.Pod) (ul int64, dl int64) {
@@ -149,7 +154,7 @@ func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Co
 		var existing networkingv1.Bandwidth
 		if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &existing); err == nil {
 			continue
-		} else if err != nil && !apierrors.IsNotFound(err) {
+		} else if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
 
@@ -166,31 +171,30 @@ func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Co
 		r.setDefaultBandwidthValues(&bw)
 		controllerutil.AddFinalizer(&bw, FinalizerName)
 
-		// Initialize status
-		bw.Status.Status = networkingv1.Creating
-		bw.Status.Capacity = bw.Spec.Capacity
-		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
-		bwExist := false
 		if err := r.Create(ctx, &bw); err != nil {
 			// tolerate race
-			if apierrors.IsAlreadyExists(err) {
-				bwExist = true
-				bw.Status.Status = networkingv1.Created
-				r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
+			if errors.IsAlreadyExists(err) {
 				continue
 			}
-			bw.Status.Status = networkingv1.Error
-			r.generateEvent(networkingv1.EventVaclabNodeBandwidthFailed, &bw)
-			r.Update(ctx, &bw)
+			return err
+		}
+
+		// Now update the status after creation
+		// Re-get the object to get the latest version
+		if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &bw); err != nil {
+			return err
+		}
+
+		bw.Status.Status = networkingv1.Created
+		bw.Status.Capacity = bw.Spec.Capacity
+		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
+
+		if err := r.UpdateBandwidthStatus(ctx, &bw); err != nil {
 			return err
 		}
 
 		// Generate event
-		if !bwExist {
-			bw.Status.Status = networkingv1.Created
-			r.Update(ctx, &bw)
-			r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
-		}
+		r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
 	}
 
 	return nil

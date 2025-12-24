@@ -29,6 +29,9 @@ spec:
                     # Bind to :0 to disable the controller-runtime managed metrics server
                     - --metrics-bind-address=0
                     {{- end }}
+                    {{- if .Values.manager.leaderElection.enabled }}
+                    - --leader-elect
+                    {{- end }}
                     - --health-probe-bind-address=:8081
                     - --default-local-ul-mbps={{ .Values.manager.bandwidth.local.uplink }}
                     - --default-local-dl-mbps={{ .Values.manager.bandwidth.local.downlink }}
@@ -41,8 +44,8 @@ spec:
                     {{- end }}
                   command:
                     - /manager
-                  image: katakuri100/vaclab-bandwidth-operator:v0.1.2
-                  imagePullPolicy: IfNotPresent
+                  image: "{{ .Values.manager.image.repository }}:{{ .Values.manager.image.tag }}"
+                  imagePullPolicy: {{ .Values.manager.image.pullPolicy }}
                   livenessProbe:
                     httpGet:
                         path: /healthz

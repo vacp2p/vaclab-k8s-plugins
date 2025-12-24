@@ -108,35 +108,45 @@ func (r *BandwidthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				controllerutil.AddFinalizer(&bw, FinalizerName)
 			}
 
-			// Initialize status
-			bw.Status.Status = networkingv1.Creating
-			bw.Status.Capacity = bw.Spec.Capacity
-			bw.Status.UpdatedAt = metav1.NewTime(time.Now())
 			// Generate event
 			r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreating, &bw)
 			var bwExist bool
 			if cerr := r.Create(ctx, &bw); cerr != nil {
 				// AlreadyExists can happen under race
 				if !errors.IsAlreadyExists(cerr) {
-					bw.Status.Status = networkingv1.Error
-					r.generateEvent(networkingv1.EventVaclabNodeBandwidthFailed, &bw)
-					r.Update(ctx, &bw)
+					// Set error status if creation failed
+					if fetchErr := r.Get(ctx, client.ObjectKeyFromObject(&bw), &bw); fetchErr == nil {
+						bw.Status.Status = networkingv1.Error
+						bw.Status.UpdatedAt = metav1.NewTime(time.Now())
+						r.Status().Update(ctx, &bw)
+						r.generateEvent(networkingv1.EventVaclabNodeBandwidthFailed, &bw)
+					}
 					return ctrl.Result{}, cerr
 				} else {
 					bwExist = true
-					bw.Status.Status = networkingv1.Created
-					r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
 					log.Info("vaclab bandwidth watcher", "message", "bandwidth resource already exists, skipping creation", "name", bw.Name, "node", bw.Spec.Node)
 				}
 			}
+
+			// Update status after creation (status cannot be set during Create)
 			if !bwExist {
+				// Fetch the created resource to update its status
+				if fetchErr := r.Get(ctx, client.ObjectKeyFromObject(&bw), &bw); fetchErr != nil {
+					return ctrl.Result{}, fetchErr
+				}
 				bw.Status.Status = networkingv1.Created
-				r.Update(ctx, &bw)
+				bw.Status.Capacity = bw.Spec.Capacity
+				bw.Status.UpdatedAt = metav1.NewTime(time.Now())
+				if statusErr := r.Status().Update(ctx, &bw); statusErr != nil {
+					// If conflict, requeue to retry
+					if errors.IsConflict(statusErr) {
+						return ctrl.Result{Requeue: true}, nil
+					}
+					return ctrl.Result{}, statusErr
+				}
 				r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
 				log.Info("vaclab bandwidth watcher", "message", "created bandwidth resource for node", "name", bw.Name, "node", bw.Spec.Node)
-			}
-
-			// Requeue to let the normal reconcile flow compute status
+			} // Requeue to let the normal reconcile flow compute status
 			return ctrl.Result{Requeue: true}, nil
 		}
 
@@ -153,7 +163,7 @@ func (r *BandwidthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if !bandwidth.ObjectMeta.DeletionTimestamp.IsZero() {
 		// The resource is being deleted
-		r.generateEvent(networkingv1.EventVaclabNodeBandwidthDeleting,&bandwidth)
+		r.generateEvent(networkingv1.EventVaclabNodeBandwidthDeleting, &bandwidth)
 		if controllerutil.ContainsFinalizer(&bandwidth, FinalizerName) {
 			log.Info("Performing cleanup before deleting vaclab node bandwidth resource")
 			err := r.Get(ctx, req.NamespacedName, &bandwidth)
@@ -163,7 +173,7 @@ func (r *BandwidthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			// Remove the finalizer to allow Kubernetes to delete the resource
 			controllerutil.RemoveFinalizer(&bandwidth, FinalizerName)
 			log.Info("vaclab bandwidth watcher", "message", "removed finalizer successfully")
-            bandwidth.Status.Status = networkingv1.Deleted
+			bandwidth.Status.Status = networkingv1.Deleted
 			r.generateEvent(networkingv1.EventVaclabNodeBandwidthDeleted, &bandwidth)
 			if err := r.Update(ctx, &bandwidth); err != nil {
 				log.Error(err, "failed to remove finalizer")

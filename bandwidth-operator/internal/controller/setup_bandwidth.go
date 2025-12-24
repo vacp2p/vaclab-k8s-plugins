@@ -404,7 +404,32 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 		},
 	}
 
-	bw.Spec.Requests = cleanRequests
+	// Check if spec.requests changed by comparing as sets (order-independent)
+	specChanged := len(bw.Spec.Requests) != len(cleanRequests)
+	if !specChanged {
+		// Build map of existing requests by PodUid for comparison
+		existingReqs := make(map[string]networkingv1.BandwidthRequest)
+		for _, req := range bw.Spec.Requests {
+			existingReqs[req.PodUid] = req
+		}
+		// Check if all clean requests match existing ones
+		for _, newReq := range cleanRequests {
+			oldReq, exists := existingReqs[newReq.PodUid]
+			if !exists || oldReq != newReq {
+				specChanged = true
+				break
+			}
+		}
+	}
+
+	bw.Spec.Requests = cleanRequests // Check if status actually changed before updating
+	statusChanged := bw.Status.Used != usedCapacity ||
+		bw.Status.Remaining != remainingCapacity ||
+		bw.Status.Capacity != bw.Spec.Capacity ||
+		bw.Status.Status != networkingv1.Created ||
+		bw.Status.ErrorReason != "" ||
+		len(bw.Status.Reservations) != len(reservationInfo)
+
 	bw.Status.Used = usedCapacity
 	bw.Status.Remaining = remainingCapacity
 	bw.Status.Reservations = reservationInfo
@@ -412,12 +437,18 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 	bw.Status.Status = networkingv1.Created
 	bw.Status.ErrorReason = ""
 
-	// Update spec (because we changed spec.requests) then status
-	if err := r.Update(ctx, bw); err != nil {
-		return ctrl.Result{}, err
+	// Update spec only if it changed
+	if specChanged {
+		if err := r.Update(ctx, bw); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
-	if err := r.UpdateBandwidthStatus(ctx, bw); err != nil {
-		return ctrl.Result{}, err
+
+	// Only update status if it actually changed
+	if statusChanged {
+		if err := r.UpdateBandwidthStatus(ctx, bw); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil

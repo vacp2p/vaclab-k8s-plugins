@@ -30,11 +30,11 @@ spec:
             - jsonPath: .status.used.network.dlMbps
               name: uDL
               type: integer
-            - jsonPath: .spec.capacity.local.ulMbps
+            - jsonPath: .status.capacity.local.ulMbps
               name: LUL
               type: integer
-            - jsonPath: .spec.capacity.local.dlMbps
-              name: LDL
+            - jsonPath: .status.capacity.local.dlMbps
+              name: uLDL
               type: integer
             - jsonPath: .status.used.local.ulMbps
               name: uLUL

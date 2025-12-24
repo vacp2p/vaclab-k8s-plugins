@@ -1,5 +1,12 @@
-# Configure the vaclab bandwidth-operator manager deployment
+# Configure the controller manager deployment
 manager:
+  replicas: 1
+  
+  image:
+    repository: katakuri100/vaclab-bandwidth-operator
+    tag: latest
+    pullPolicy: IfNotPresent
+
   # Bandwidth configuration
   bandwidth:
     # Default local (OVS/bridge) bandwidth limits in Mbps

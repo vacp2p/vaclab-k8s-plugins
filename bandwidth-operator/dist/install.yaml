@@ -38,11 +38,11 @@ spec:
     - jsonPath: .status.used.network.dlMbps
       name: uDL
       type: integer
-    - jsonPath: .status.capacity.local.ulMbps
+    - jsonPath: .spec.capacity.local.ulMbps
       name: LUL
       type: integer
-    - jsonPath: .status.capacity.local.dlMbps
-      name: uLDL
+    - jsonPath: .spec.capacity.local.dlMbps
+      name: LDL
       type: integer
     - jsonPath: .status.used.local.ulMbps
       name: uLUL
@@ -658,7 +658,7 @@ spec:
         - --ingress-bandwidth-annotation=ovn.kubernetes.io/ingress_rate
         command:
         - /manager
-        image: controller:latest
+        image: katakuri100/vaclab-bandwidth-operator:v0.1.2
         livenessProbe:
           httpGet:
             path: /healthz

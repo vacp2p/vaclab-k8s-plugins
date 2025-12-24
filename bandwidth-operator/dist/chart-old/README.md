@@ -4,7 +4,7 @@ A Helm chart for deploying the Vaclab Bandwidth Operator - a Kubernetes operator
 
 ## Prerequisites
 
-- Kubernetes v1.34+
+- Kubernetes v1.11.3+
 - Helm 3.0+
 - kubectl configured with cluster access
 
