@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 func (r *BandwidthReconciler) generateEvent(event networkingv1.EventVaclabNodeBandwidth, bandwidthResource *networkingv1.Bandwidth) {
@@ -58,7 +57,7 @@ func (r *BandwidthReconciler) setDefaultBandwidthValues(bandwidth *networkingv1.
 }
 
 func (r *BandwidthReconciler) UpdateBandwidthStatus(ctx context.Context, bandwidth *networkingv1.Bandwidth) error {
-	bandwidth.Status.UpdatedAt = metav1.NewTime(time.Now())
+	// UpdatedAt is set by caller only when status actually changes
 	err := r.Status().Update(ctx, bandwidth)
 	// If conflict, return without error to allow retry
 	if errors.IsConflict(err) {
@@ -169,7 +168,6 @@ func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Co
 		}
 
 		r.setDefaultBandwidthValues(&bw)
-		controllerutil.AddFinalizer(&bw, FinalizerName)
 
 		if err := r.Create(ctx, &bw); err != nil {
 			// tolerate race

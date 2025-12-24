@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -36,7 +35,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // BandwidthReconciler reconciles a Bandwidth object
@@ -57,8 +55,6 @@ type BandwidthConfig struct {
 	IngressBandwidthAnnotation string
 }
 
-const FinalizerName = "finalizer.bandwidth.vaclab.org"
-
 // +kubebuilder:rbac:groups=networking.vaclab.org,resources=bandwidths,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.vaclab.org,resources=bandwidths/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=networking.vaclab.org,resources=bandwidths/finalizers,verbs=update
@@ -76,7 +72,6 @@ const FinalizerName = "finalizer.bandwidth.vaclab.org"
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.4/pkg/reconcile
 func (r *BandwidthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-	log.Info("reconciling vaclab node bandwidth resource")
 
 	var bandwidth networkingv1.Bandwidth
 	err := r.Get(ctx, req.NamespacedName, &bandwidth)
@@ -88,10 +83,14 @@ func (r *BandwidthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			if nerr != nil {
 				if errors.IsNotFound(nerr) {
 					// Node doesn't exist; nothing to do
+					log.V(1).Info("reconcile triggered but neither bandwidth nor node exists", "name", req.Name, "trigger", "node-or-pod-watch")
 					return ctrl.Result{}, nil
 				}
 				return ctrl.Result{}, nerr
 			}
+
+			// Bandwidth missing but node exists - likely triggered by node/pod event
+			log.Info("bandwidth resource missing, creating new one", "node", req.Name, "trigger", "node-or-pod-watch")
 
 			// Create BW resource named after node
 			bw := networkingv1.Bandwidth{
@@ -103,10 +102,6 @@ func (r *BandwidthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				},
 			}
 			r.setDefaultBandwidthValues(&bw)
-
-			if !controllerutil.ContainsFinalizer(&bw, FinalizerName) {
-				controllerutil.AddFinalizer(&bw, FinalizerName)
-			}
 
 			// Generate event
 			r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreating, &bw)
@@ -154,39 +149,8 @@ func (r *BandwidthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !controllerutil.ContainsFinalizer(&bandwidth, FinalizerName) {
-		controllerutil.AddFinalizer(&bandwidth, FinalizerName)
-		if err := r.Update(ctx, &bandwidth); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
-	if !bandwidth.ObjectMeta.DeletionTimestamp.IsZero() {
-		// The resource is being deleted
-		r.generateEvent(networkingv1.EventVaclabNodeBandwidthDeleting, &bandwidth)
-		if controllerutil.ContainsFinalizer(&bandwidth, FinalizerName) {
-			log.Info("Performing cleanup before deleting vaclab node bandwidth resource")
-			err := r.Get(ctx, req.NamespacedName, &bandwidth)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			// Remove the finalizer to allow Kubernetes to delete the resource
-			controllerutil.RemoveFinalizer(&bandwidth, FinalizerName)
-			log.Info("vaclab bandwidth watcher", "message", "removed finalizer successfully")
-			bandwidth.Status.Status = networkingv1.Deleted
-			r.generateEvent(networkingv1.EventVaclabNodeBandwidthDeleted, &bandwidth)
-			if err := r.Update(ctx, &bandwidth); err != nil {
-				log.Error(err, "failed to remove finalizer")
-				return ctrl.Result{}, err
-			}
-
-		}
-		// Stop reconciliation as the object is being deleted
-		log.Info("vaclab bandwidth watcher", "message", "successfully removed node bandwidth resource", "name", bandwidth.Name, "node", bandwidth.Spec.Node)
-		return ctrl.Result{}, nil
-	}
-
-	log.Info(fmt.Sprintf("found vaclab Bandwidth resource to reconcile: %v", bandwidth))
+	// Bandwidth exists - triggered by bandwidth/pod/node event
+	log.V(1).Info("reconciling bandwidth resource", "node", bandwidth.Spec.Node, "status", bandwidth.Status.Status)
 
 	if bandwidth.Status.Status == networkingv1.None || bandwidth.Status.Status == "" || bandwidth.Status.Status == networkingv1.Created {
 		return r.SyncFromSpecAndPods(ctx, &bandwidth)

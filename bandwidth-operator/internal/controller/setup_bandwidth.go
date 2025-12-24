@@ -8,6 +8,7 @@ import (
 	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -172,6 +173,7 @@ func (r *BandwidthReconciler) SetupBandwidthResource(ctx context.Context, bandwi
 	bandwidth.Status.Reservations = reservationInfo
 	bandwidth.Status.Capacity = bandwidth.Spec.Capacity
 	bandwidth.Status.Status = networkingv1.Created
+	bandwidth.Status.UpdatedAt = metav1.NewTime(time.Now())
 
 	if err := r.UpdateBandwidthStatus(ctx, bandwidth); err != nil {
 		log.Error(err, "unable to update bandwidth resource status", "node", nodeName)
@@ -252,6 +254,7 @@ func (r *BandwidthReconciler) CheckAndUpdateBandwidth(ctx context.Context, bandw
 		}
 	}
 	bandwidth.Status = state
+	bandwidth.Status.UpdatedAt = metav1.NewTime(time.Now())
 
 	if err := r.UpdateBandwidthStatus(ctx, bandwidth); err != nil {
 		log.Error(err, "unable to update bandwidth resource status", "node", nodeName)
@@ -279,6 +282,7 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 		}
 		bw.Status.Status = networkingv1.Error
 		bw.Status.ErrorReason = "unable to fetch node information"
+		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
 		_ = r.UpdateBandwidthStatus(ctx, bw)
 		return ctrl.Result{}, err
 	}
@@ -287,6 +291,7 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 	if !strings.EqualFold(bwName, node.Name) {
 		bw.Status.Status = networkingv1.Error
 		bw.Status.ErrorReason = "name mismatch between nodeName and bandwidthName"
+		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
 		_ = r.UpdateBandwidthStatus(ctx, bw)
 		return ctrl.Result{}, nil
 	}
@@ -299,6 +304,7 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 	if err := r.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
 		bw.Status.Status = networkingv1.Error
 		bw.Status.ErrorReason = "failed to list pods for specified node"
+		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
 		_ = r.UpdateBandwidthStatus(ctx, bw)
 		return ctrl.Result{}, err
 	}
@@ -446,9 +452,11 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 
 	// Only update status if it actually changed
 	if statusChanged {
+		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
 		if err := r.UpdateBandwidthStatus(ctx, bw); err != nil {
 			return ctrl.Result{}, err
 		}
+		log.Info("bandwidth status updated", "node", nodeName, "used_local", usedUlLocal+usedDlLocal, "used_network", usedUlNetwork+usedDlNetwork)
 	}
 
 	return ctrl.Result{}, nil
