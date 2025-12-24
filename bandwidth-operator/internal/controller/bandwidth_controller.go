@@ -150,13 +150,14 @@ func (r *BandwidthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Bandwidth exists - triggered by bandwidth/pod/node event
-	log.V(1).Info("reconciling bandwidth resource", "node", bandwidth.Spec.Node, "status", bandwidth.Status.Status)
 
 	if bandwidth.Status.Status == networkingv1.None || bandwidth.Status.Status == "" || bandwidth.Status.Status == networkingv1.Created {
 		return r.SyncFromSpecAndPods(ctx, &bandwidth)
 	}
 
 	if bandwidth.Status.Status == networkingv1.Deleted {
+		// Nothing to do; resource is marked deleted
+		log.V(1).Info("bandwidth resource deleted", "node", bandwidth.Spec.Node, "status", bandwidth.Status.Status)
 		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{}, nil

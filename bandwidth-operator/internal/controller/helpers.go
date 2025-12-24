@@ -2,7 +2,7 @@ package controller
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"time"
 
 	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
@@ -72,31 +72,25 @@ func (r *BandwidthReconciler) GetBandwidthFromAnnotation(pod corev1.Pod) (ul int
 
 	// Parse egress bandwidth
 	if egress != "" {
-		if qEgress, err := resource.ParseQuantity(egress); err == nil {
-			// Successfully parsed as Quantity (e.g., "100M", "1G")
-			ul = qEgress.Value() / (1000000) // convert from bytes to megabits
-		} else {
-			// Failed to parse as Quantity, try parsing as plain number (e.g., KubeOVN format)
-			// Plain numbers are interpreted as Mbps directly
-			var plainValue int64
-			if _, err := fmt.Sscanf(egress, "%d", &plainValue); err == nil {
-				ul = plainValue
-			}
+		// Try parsing as plain integer first (KubeOVN format: just "20" means 20 Mbps)
+		if plainValue, err := strconv.Atoi(egress); err == nil {
+			ul = int64(plainValue)
+		} else if qEgress, err := resource.ParseQuantity(egress); err == nil {
+			// Parse as Kubernetes Quantity (e.g., "100M", "1G")
+			// Convert from bytes to Mbps
+			ul = (qEgress.Value()) / 1000000
 		}
 	}
 
 	// Parse ingress bandwidth
 	if ingress != "" {
-		if qIngress, err := resource.ParseQuantity(ingress); err == nil {
-			// Successfully parsed as Quantity (e.g., "100M", "1G")
-			dl = qIngress.Value() / (1000000) // convert from bytes to megabits
-		} else {
-			// Failed to parse as Quantity, try parsing as plain number (e.g., KubeOVN format)
-			// Plain numbers are interpreted as Mbps directly
-			var plainValue int64
-			if _, err := fmt.Sscanf(ingress, "%d", &plainValue); err == nil {
-				dl = plainValue
-			}
+		// Try parsing as plain integer first (KubeOVN format: just "20" means 20 Mbps)
+		if plainValue, err := strconv.Atoi(ingress); err == nil {
+			dl = int64(plainValue)
+		} else if qIngress, err := resource.ParseQuantity(ingress); err == nil {
+			// Parse as Kubernetes Quantity (e.g., "100M", "1G")
+			// Convert from bytes to Mbps
+			dl = (qIngress.Value()) / 1000000
 		}
 	}
 

@@ -313,9 +313,11 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 	podsWithBw := make(map[string]corev1.Pod)
 	for _, pod := range podList.Items {
 		if pod.DeletionTimestamp != nil {
+			log.V(1).Info("skipping pod marked for deletion", "pod", pod.Name, "namespace", pod.Namespace)
 			continue
 		}
 		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			//log.V(1).Info("skipping pod in terminal phase", "pod", pod.Name, "namespace", pod.Namespace)
 			continue
 		}
 
@@ -339,10 +341,12 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 		pod, exists := podsWithBw[req.PodUid]
 		if !exists {
 			// pod gone or no bw annotation anymore => drop request
+			log.Info("dropping request for missing pod", "podUid", req.PodUid, "podName", req.PodName)
 			continue
 		}
 
 		ul, dl := r.GetBandwidthFromAnnotation(pod)
+		//log.Info("parsed bandwidth from pod", "pod", pod.Name, "namespace", pod.Namespace, "ul", ul, "dl", dl)
 		cleanRequests = append(cleanRequests, networkingv1.BandwidthRequest{
 			PodName:   pod.Name,
 			Namespace: pod.Namespace,
@@ -411,7 +415,7 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 	}
 
 	// Check if spec.requests changed by comparing as sets (order-independent)
-	specChanged := len(bw.Spec.Requests) != len(cleanRequests)
+	specChanged := (len(bw.Spec.Requests) != len(cleanRequests)) || (bw.Spec.Capacity != bw.Status.Capacity)
 	if !specChanged {
 		// Build map of existing requests by PodUid for comparison
 		existingReqs := make(map[string]networkingv1.BandwidthRequest)
@@ -448,6 +452,7 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 		if err := r.Update(ctx, bw); err != nil {
 			return ctrl.Result{}, err
 		}
+		log.Info("bandwidth spec updated", "node", nodeName, "requests", len(cleanRequests))
 	}
 
 	// Only update status if it actually changed
@@ -456,8 +461,10 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 		if err := r.UpdateBandwidthStatus(ctx, bw); err != nil {
 			return ctrl.Result{}, err
 		}
-		log.Info("bandwidth status updated", "node", nodeName, "used_local", usedUlLocal+usedDlLocal, "used_network", usedUlNetwork+usedDlNetwork)
-	}
+		log.Info("bandwidth status updated", "node", nodeName, "used_local_ul", usedUlLocal, "used_local_dl", usedDlLocal, "used_network_ul", usedUlNetwork, "used_network_dl", usedDlNetwork, "remaining_local_ul", remainingCapacity.Local.UlMbps, "remaining_local_dl", remainingCapacity.Local.DlMbps, "remaining_network_ul", remainingCapacity.Network.UlMbps, "remaining_network_dl", remainingCapacity.Network.DlMbps, "requests", len(cleanRequests))
+	} /*else {
+		log.V(1).Info("bandwidth unchanged, skipping status update", "node", nodeName)
+	}*/
 
 	return ctrl.Result{}, nil
 }
