@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
@@ -43,16 +44,16 @@ func (r *BandwidthReconciler) generateEvent(event networkingv1.EventVaclabNodeBa
 
 func (r *BandwidthReconciler) setDefaultBandwidthValues(bandwidth *networkingv1.Bandwidth) {
 	if bandwidth.Spec.Capacity.Local.UlMbps == 0 {
-		bandwidth.Spec.Capacity.Local.UlMbps = DEFAULT_LOCAL_UL_BANDWIDTH_MBPS
+		bandwidth.Spec.Capacity.Local.UlMbps = r.Config.DefaultLocalUL
 	}
 	if bandwidth.Spec.Capacity.Local.DlMbps == 0 {
-		bandwidth.Spec.Capacity.Local.DlMbps = DEFAULT_LOCAL_DL_BANDWIDTH_MBPS
+		bandwidth.Spec.Capacity.Local.DlMbps = r.Config.DefaultLocalDL
 	}
 	if bandwidth.Spec.Capacity.Network.UlMbps == 0 {
-		bandwidth.Spec.Capacity.Network.UlMbps = DEFAULT_NETWORK_UL_BANDWIDTH_MBPS
+		bandwidth.Spec.Capacity.Network.UlMbps = r.Config.DefaultNetworkUL
 	}
 	if bandwidth.Spec.Capacity.Network.DlMbps == 0 {
-		bandwidth.Spec.Capacity.Network.DlMbps = DEFAULT_NETWORK_DL_BANDWIDTH_MBPS
+		bandwidth.Spec.Capacity.Network.DlMbps = r.Config.DefaultNetworkDL
 	}
 }
 
@@ -61,17 +62,41 @@ func (r *BandwidthReconciler) UpdateBandwidthStatus(ctx context.Context, bandwid
 	return r.Status().Update(ctx, bandwidth)
 }
 
-func GetBandwidthFromAnnotation(pod corev1.Pod) (ul int64, dl int64) {
-	egress, _ := pod.Annotations["kubernetes.io/egress-bandwidth"]
-	ingress, _ := pod.Annotations["kubernetes.io/ingress-bandwidth"]
-	if qEgress, err := resource.ParseQuantity(egress); err == nil {
-		ul = qEgress.Value() / (1000000) // convert from bytes to megabits
-	}
-	if qIngress, err := resource.ParseQuantity(ingress); err == nil {
-		dl = qIngress.Value() / (1000000) // convert from bytes to megabits
-	}
-	return
+func (r *BandwidthReconciler) GetBandwidthFromAnnotation(pod corev1.Pod) (ul int64, dl int64) {
+	egress, _ := pod.Annotations[r.Config.EgressBandwidthAnnotation]
+	ingress, _ := pod.Annotations[r.Config.IngressBandwidthAnnotation]
 
+	// Parse egress bandwidth
+	if egress != "" {
+		if qEgress, err := resource.ParseQuantity(egress); err == nil {
+			// Successfully parsed as Quantity (e.g., "100M", "1G")
+			ul = qEgress.Value() / (1000000) // convert from bytes to megabits
+		} else {
+			// Failed to parse as Quantity, try parsing as plain number (e.g., KubeOVN format)
+			// Plain numbers are interpreted as Mbps directly
+			var plainValue int64
+			if _, err := fmt.Sscanf(egress, "%d", &plainValue); err == nil {
+				ul = plainValue
+			}
+		}
+	}
+
+	// Parse ingress bandwidth
+	if ingress != "" {
+		if qIngress, err := resource.ParseQuantity(ingress); err == nil {
+			// Successfully parsed as Quantity (e.g., "100M", "1G")
+			dl = qIngress.Value() / (1000000) // convert from bytes to megabits
+		} else {
+			// Failed to parse as Quantity, try parsing as plain number (e.g., KubeOVN format)
+			// Plain numbers are interpreted as Mbps directly
+			var plainValue int64
+			if _, err := fmt.Sscanf(ingress, "%d", &plainValue); err == nil {
+				dl = plainValue
+			}
+		}
+	}
+
+	return
 }
 
 // WorkloadRef is a small struct to transport workload metadata
@@ -140,12 +165,31 @@ func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Co
 
 		r.setDefaultBandwidthValues(&bw)
 		controllerutil.AddFinalizer(&bw, FinalizerName)
+
+		// Initialize status
+		bw.Status.Status = networkingv1.Creating
+		bw.Status.Capacity = bw.Spec.Capacity
+		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
+		bwExist := false
 		if err := r.Create(ctx, &bw); err != nil {
 			// tolerate race
 			if apierrors.IsAlreadyExists(err) {
+				bwExist = true
+				bw.Status.Status = networkingv1.Created
+				r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
 				continue
 			}
+			bw.Status.Status = networkingv1.Error
+			r.generateEvent(networkingv1.EventVaclabNodeBandwidthFailed, &bw)
+			r.Update(ctx, &bw)
 			return err
+		}
+
+		// Generate event
+		if !bwExist {
+			bw.Status.Status = networkingv1.Created
+			r.Update(ctx, &bw)
+			r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
 		}
 	}
 

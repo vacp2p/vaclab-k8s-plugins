@@ -1,0 +1,35 @@
+# Example values for Calico/Cilium/Standard Kubernetes CNI
+# Use with: helm install vaclab-bandwidth-operator ./dist/chart -f examples/standard-cni-values.yaml
+
+manager:
+  image:
+    repository: katakuri100/vaclab-bandwidth-operator
+    tag: latest
+  
+  bandwidth:
+    local:
+      uplink: 20000
+      downlink: 20000
+    network:
+      uplink: 10000   # Higher bandwidth for data center setup
+      downlink: 10000
+  
+  # Standard Kubernetes bandwidth annotations
+  annotations:
+    egress: "kubernetes.io/egress-bandwidth"
+    ingress: "kubernetes.io/ingress-bandwidth"
+  
+  leaderElection:
+    enabled: true  # Enable for HA setup
+  
+  replicas: 3  # Run 3 replicas for high availability
+
+crd:
+  enable: true
+  keep: true
+
+metrics:
+  enable: true
+
+prometheus:
+  enable: true  # Enable if prometheus-operator is installed

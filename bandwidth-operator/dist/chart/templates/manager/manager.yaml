@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    labels:
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/name: bandwidth-operator
+        control-plane: controller-manager
+    name: vaclab-bandwidth-operator-controller-manager
+    namespace: vaclab-system
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: bandwidth-operator
+            control-plane: controller-manager
+    template:
+        metadata:
+            annotations:
+                kubectl.kubernetes.io/default-container: manager
+            labels:
+                app.kubernetes.io/name: bandwidth-operator
+                control-plane: controller-manager
+        spec:
+            containers:
+                - args:
+                    {{- if .Values.metrics.enable }}
+                    - --metrics-bind-address=:{{ .Values.metrics.port }}
+                    {{- else }}
+                    # Bind to :0 to disable the controller-runtime managed metrics server
+                    - --metrics-bind-address=0
+                    {{- end }}
+                    {{- if .Values.manager.leaderElection.enabled }}
+                    - --leader-elect
+                    {{- end }}
+                    - --health-probe-bind-address=:8081
+                    - --default-local-ul-mbps={{ .Values.manager.bandwidth.local.uplink }}
+                    - --default-local-dl-mbps={{ .Values.manager.bandwidth.local.downlink }}
+                    - --default-network-ul-mbps={{ .Values.manager.bandwidth.network.uplink }}
+                    - --default-network-dl-mbps={{ .Values.manager.bandwidth.network.downlink }}
+                    - --egress-bandwidth-annotation={{ .Values.manager.annotations.egress }}
+                    - --ingress-bandwidth-annotation={{ .Values.manager.annotations.ingress }}
+                    {{- range .Values.manager.args }}
+                    - {{ . }}
+                    {{- end }}
+                  command:
+                    - /manager
+                  image: "{{ .Values.manager.image.repository }}:{{ .Values.manager.image.tag }}"
+                  imagePullPolicy: {{ .Values.manager.image.pullPolicy }}
+                  livenessProbe:
+                    httpGet:
+                        path: /healthz
+                        port: 8081
+                    initialDelaySeconds: 15
+                    periodSeconds: 20
+                  name: manager
+                  ports: []
+                  readinessProbe:
+                    httpGet:
+                        path: /readyz
+                        port: 8081
+                    initialDelaySeconds: 5
+                    periodSeconds: 10
+                  resources:
+                    {{- if .Values.manager.resources }}
+                    {{- toYaml .Values.manager.resources | nindent 20 }}
+                    {{- else }}
+                    {}
+                    {{- end }}
+                  securityContext:
+                    {{- if .Values.manager.securityContext }}
+                    {{- toYaml .Values.manager.securityContext | nindent 20 }}
+                    {{- else }}
+                    {}
+                    {{- end }}
+                  volumeMounts: []
+            securityContext:
+              {{- if .Values.manager.podSecurityContext }}
+              {{- toYaml .Values.manager.podSecurityContext | nindent 14 }}
+              {{- else }}
+              {}
+              {{- end }}
+            serviceAccountName: vaclab-bandwidth-operator-controller-manager
+            terminationGracePeriodSeconds: 10
+            volumes: []

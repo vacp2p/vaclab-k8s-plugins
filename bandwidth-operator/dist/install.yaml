@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
     control-plane: controller-manager
-  name: bandwidth-operator-system
+  name: vaclab-system
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -33,22 +33,22 @@ spec:
       name: DL
       type: integer
     - jsonPath: .status.used.network.ulMbps
-      name: UsedUL
+      name: uUL
       type: integer
     - jsonPath: .status.used.network.dlMbps
-      name: UsedDL
+      name: uDL
       type: integer
     - jsonPath: .status.capacity.local.ulMbps
-      name: LoUL
+      name: LUL
       type: integer
     - jsonPath: .status.capacity.local.dlMbps
-      name: LoDL
+      name: uLDL
       type: integer
     - jsonPath: .status.used.local.ulMbps
-      name: UsedLoUL
+      name: uLUL
       type: integer
     - jsonPath: .status.used.local.dlMbps
-      name: UsedLoDL
+      name: uLDL
       type: integer
     - jsonPath: .status.status
       name: State
@@ -310,6 +310,7 @@ spec:
                   type: object
                 type: array
               status:
+                default: None
                 enum:
                 - Created
                 - Creating
@@ -372,8 +373,8 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
-  name: bandwidth-operator-controller-manager
-  namespace: bandwidth-operator-system
+  name: vaclab-bandwidth-operator-controller-manager
+  namespace: vaclab-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -381,8 +382,8 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
-  name: bandwidth-operator-leader-election-role
-  namespace: bandwidth-operator-system
+  name: vaclab-bandwidth-operator-leader-election-role
+  namespace: vaclab-system
 rules:
 - apiGroups:
   - ""
@@ -422,7 +423,7 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
-  name: bandwidth-operator-bandwidth-admin-role
+  name: vaclab-bandwidth-operator-bandwidth-admin-role
 rules:
 - apiGroups:
   - networking.vaclab.org
@@ -443,7 +444,7 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
-  name: bandwidth-operator-bandwidth-editor-role
+  name: vaclab-bandwidth-operator-bandwidth-editor-role
 rules:
 - apiGroups:
   - networking.vaclab.org
@@ -470,7 +471,7 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
-  name: bandwidth-operator-bandwidth-viewer-role
+  name: vaclab-bandwidth-operator-bandwidth-viewer-role
 rules:
 - apiGroups:
   - networking.vaclab.org
@@ -490,7 +491,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: bandwidth-operator-manager-role
+  name: vaclab-bandwidth-operator-manager-role
 rules:
 - apiGroups:
   - ""
@@ -531,7 +532,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: bandwidth-operator-metrics-auth-role
+  name: vaclab-bandwidth-operator-metrics-auth-role
 rules:
 - apiGroups:
   - authentication.k8s.io
@@ -549,7 +550,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: bandwidth-operator-metrics-reader
+  name: vaclab-bandwidth-operator-metrics-reader
 rules:
 - nonResourceURLs:
   - /metrics
@@ -562,16 +563,16 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
-  name: bandwidth-operator-leader-election-rolebinding
-  namespace: bandwidth-operator-system
+  name: vaclab-bandwidth-operator-leader-election-rolebinding
+  namespace: vaclab-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: bandwidth-operator-leader-election-role
+  name: vaclab-bandwidth-operator-leader-election-role
 subjects:
 - kind: ServiceAccount
-  name: bandwidth-operator-controller-manager
-  namespace: bandwidth-operator-system
+  name: vaclab-bandwidth-operator-controller-manager
+  namespace: vaclab-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -579,28 +580,28 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
-  name: bandwidth-operator-manager-rolebinding
+  name: vaclab-bandwidth-operator-manager-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: bandwidth-operator-manager-role
+  name: vaclab-bandwidth-operator-manager-role
 subjects:
 - kind: ServiceAccount
-  name: bandwidth-operator-controller-manager
-  namespace: bandwidth-operator-system
+  name: vaclab-bandwidth-operator-controller-manager
+  namespace: vaclab-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: bandwidth-operator-metrics-auth-rolebinding
+  name: vaclab-bandwidth-operator-metrics-auth-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: bandwidth-operator-metrics-auth-role
+  name: vaclab-bandwidth-operator-metrics-auth-role
 subjects:
 - kind: ServiceAccount
-  name: bandwidth-operator-controller-manager
-  namespace: bandwidth-operator-system
+  name: vaclab-bandwidth-operator-controller-manager
+  namespace: vaclab-system
 ---
 apiVersion: v1
 kind: Service
@@ -609,8 +610,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
     control-plane: controller-manager
-  name: bandwidth-operator-controller-manager-metrics-service
-  namespace: bandwidth-operator-system
+  name: vaclab-bandwidth-operator-controller-manager-metrics-service
+  namespace: vaclab-system
 spec:
   ports:
   - name: https
@@ -628,8 +629,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: bandwidth-operator
     control-plane: controller-manager
-  name: bandwidth-operator-controller-manager
-  namespace: bandwidth-operator-system
+  name: vaclab-bandwidth-operator-controller-manager
+  namespace: vaclab-system
 spec:
   replicas: 1
   selector:
@@ -649,9 +650,15 @@ spec:
         - --metrics-bind-address=:8443
         - --leader-elect
         - --health-probe-bind-address=:8081
+        - --default-local-ul-mbps=20000
+        - --default-local-dl-mbps=20000
+        - --default-network-ul-mbps=1000
+        - --default-network-dl-mbps=1000
+        - --egress-bandwidth-annotation=ovn.kubernetes.io/egress_rate
+        - --ingress-bandwidth-annotation=ovn.kubernetes.io/ingress_rate
         command:
         - /manager
-        image: katakuri100/vaclab-bandwidth-operator:latest
+        image: controller:latest
         livenessProbe:
           httpGet:
             path: /healthz
@@ -684,6 +691,6 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      serviceAccountName: bandwidth-operator-controller-manager
+      serviceAccountName: vaclab-bandwidth-operator-controller-manager
       terminationGracePeriodSeconds: 10
       volumes: []

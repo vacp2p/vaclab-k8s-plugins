@@ -102,7 +102,7 @@ const (
 	Deleted  Status = "Deleted"
 	Deleting Status = "Deleting"
 	Error    Status = "Error"
-	None     Status = ""
+	None     Status = "None"
 )
 
 type EventVaclabNodeBandwidth string
@@ -118,7 +118,8 @@ const (
 // BandwidthStatus defines the observed state of Bandwidth.
 type BandwidthStatus struct {
 	// +optional
-	Status Status `json:"status"`
+	// +kubebuilder:default="None"
+	Status Status `json:"status,omitempty"`
 
 	// +optional
 	ErrorReason string `json:"errorReason"`
@@ -149,12 +150,12 @@ type BandwidthStatus struct {
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.node"
 // +kubebuilder:printcolumn:name="UL",type=integer,JSONPath=".spec.capacity.network.ulMbps"
 // +kubebuilder:printcolumn:name="DL",type=integer,JSONPath=".spec.capacity.network.dlMbps"
-// +kubebuilder:printcolumn:name="UsedUL",type=integer,JSONPath=".status.used.network.ulMbps"
-// +kubebuilder:printcolumn:name="UsedDL",type=integer,JSONPath=".status.used.network.dlMbps"
-// +kubebuilder:printcolumn:name="LoUL",type=integer,JSONPath=".status.capacity.local.ulMbps"
-// +kubebuilder:printcolumn:name="LoDL",type=integer,JSONPath=".status.capacity.local.dlMbps"
-// +kubebuilder:printcolumn:name="UsedLoUL",type=integer,JSONPath=".status.used.local.ulMbps"
-// +kubebuilder:printcolumn:name="UsedLoDL",type=integer,JSONPath=".status.used.local.dlMbps"
+// +kubebuilder:printcolumn:name="uUL",type=integer,JSONPath=".status.used.network.ulMbps"
+// +kubebuilder:printcolumn:name="uDL",type=integer,JSONPath=".status.used.network.dlMbps"
+// +kubebuilder:printcolumn:name="LUL",type=integer,JSONPath=".status.capacity.local.ulMbps"
+// +kubebuilder:printcolumn:name="uLDL",type=integer,JSONPath=".status.capacity.local.dlMbps"
+// +kubebuilder:printcolumn:name="uLUL",type=integer,JSONPath=".status.used.local.ulMbps"
+// +kubebuilder:printcolumn:name="uLDL",type=integer,JSONPath=".status.used.local.dlMbps"
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 

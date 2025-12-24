@@ -86,9 +86,9 @@ func (r *BandwidthReconciler) SetupBandwidthResource(ctx context.Context, bandwi
 		}
 		podsWithBwAnnotation := make(map[string]corev1.Pod)
 		for _, pod := range podList.Items {
-			if _, exists := pod.Annotations["kubernetes.io/egress-bandwidth"]; exists {
+			if _, exists := pod.Annotations[r.Config.EgressBandwidthAnnotation]; exists {
 				podsWithBwAnnotation[string(pod.GetUID())] = pod
-			} else if _, exists := pod.Annotations["kubernetes.io/ingress-bandwidth"]; exists {
+			} else if _, exists := pod.Annotations[r.Config.IngressBandwidthAnnotation]; exists {
 				podsWithBwAnnotation[string(pod.GetUID())] = pod
 			} else {
 				continue
@@ -98,7 +98,7 @@ func (r *BandwidthReconciler) SetupBandwidthResource(ctx context.Context, bandwi
 		// Calculate used bandwidth from existing requests
 		for _, req := range bwRequests {
 			if pod, exists := podsWithBwAnnotation[req.PodUid]; exists {
-				ul, dl := GetBandwidthFromAnnotation(pod)
+				ul, dl := r.GetBandwidthFromAnnotation(pod)
 				cleanRequests = append(cleanRequests, networkingv1.BandwidthRequest{
 					PodName:   pod.GetName(),
 					Namespace: pod.GetNamespace(),
@@ -262,164 +262,163 @@ func (r *BandwidthReconciler) CheckAndUpdateBandwidth(ctx context.Context, bandw
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-
 func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *networkingv1.Bandwidth) (ctrl.Result, error) {
-    log := log.FromContext(ctx)
+	log := log.FromContext(ctx)
 
-    nodeName := bw.Spec.Node
-    bwName := bw.Name
+	nodeName := bw.Spec.Node
+	bwName := bw.Name
 
-    // Validate node exists
-    var node corev1.Node
-    if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
-        if apierrors.IsNotFound(err) {
-            // Node gone => delete BW
-            log.Info("Node not found, deleting Bandwidth", "node", nodeName)
-            _ = r.Delete(ctx, bw)
-            return ctrl.Result{}, nil
-        }
-        bw.Status.Status = networkingv1.Error
-        bw.Status.ErrorReason = "unable to fetch node information"
-        _ = r.UpdateBandwidthStatus(ctx, bw)
-        return ctrl.Result{}, err
-    }
+	// Validate node exists
+	var node corev1.Node
+	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Node gone => delete BW
+			log.Info("Node not found, deleting Bandwidth", "node", nodeName)
+			_ = r.Delete(ctx, bw)
+			return ctrl.Result{}, nil
+		}
+		bw.Status.Status = networkingv1.Error
+		bw.Status.ErrorReason = "unable to fetch node information"
+		_ = r.UpdateBandwidthStatus(ctx, bw)
+		return ctrl.Result{}, err
+	}
 
-    // Enforce invariant: BW name == node name
-    if !strings.EqualFold(bwName, node.Name) {
-        bw.Status.Status = networkingv1.Error
-        bw.Status.ErrorReason = "name mismatch between nodeName and bandwidthName"
-        _ = r.UpdateBandwidthStatus(ctx, bw)
-        return ctrl.Result{}, nil
-    }
+	// Enforce invariant: BW name == node name
+	if !strings.EqualFold(bwName, node.Name) {
+		bw.Status.Status = networkingv1.Error
+		bw.Status.ErrorReason = "name mismatch between nodeName and bandwidthName"
+		_ = r.UpdateBandwidthStatus(ctx, bw)
+		return ctrl.Result{}, nil
+	}
 
-    // set Defaults
-    r.setDefaultBandwidthValues(bw)
+	// set Defaults
+	r.setDefaultBandwidthValues(bw)
 
-    // List pods on the node (all namespaces)
-    var podList corev1.PodList
-    if err := r.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
-        bw.Status.Status = networkingv1.Error
-        bw.Status.ErrorReason = "failed to list pods for specified node"
-        _ = r.UpdateBandwidthStatus(ctx, bw)
-        return ctrl.Result{}, err
-    }
+	// List pods on the node (all namespaces)
+	var podList corev1.PodList
+	if err := r.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
+		bw.Status.Status = networkingv1.Error
+		bw.Status.ErrorReason = "failed to list pods for specified node"
+		_ = r.UpdateBandwidthStatus(ctx, bw)
+		return ctrl.Result{}, err
+	}
 
-    // Build map of pods that currently have bw annotations
-    podsWithBw := make(map[string]corev1.Pod)
-    for _, pod := range podList.Items {
-        if pod.DeletionTimestamp != nil {
-            continue
-        }
-        if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-            continue
-        }
+	// Build map of pods that currently have bw annotations
+	podsWithBw := make(map[string]corev1.Pod)
+	for _, pod := range podList.Items {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
 
-        if _, ok := pod.Annotations["kubernetes.io/egress-bandwidth"]; ok {
-            podsWithBw[string(pod.UID)] = pod
-            continue
-        }
-        if _, ok := pod.Annotations["kubernetes.io/ingress-bandwidth"]; ok {
-            podsWithBw[string(pod.UID)] = pod
-            continue
-        }
-    }
+		if _, ok := pod.Annotations[r.Config.EgressBandwidthAnnotation]; ok {
+			podsWithBw[string(pod.UID)] = pod
+			continue
+		}
+		if _, ok := pod.Annotations[r.Config.IngressBandwidthAnnotation]; ok {
+			podsWithBw[string(pod.UID)] = pod
+			continue
+		}
+	}
 
-    // Recompute based on spec.requests and current pod annotations
-    bwRequests := bw.Spec.Requests
-    cleanRequests := make([]networkingv1.BandwidthRequest, 0, len(bwRequests))
-    reservationInfo := make([]networkingv1.ReservationInfo, 0, len(bwRequests))
-    var usedUlLocal, usedDlLocal, usedUlNetwork, usedDlNetwork int64
+	// Recompute based on spec.requests and current pod annotations
+	bwRequests := bw.Spec.Requests
+	cleanRequests := make([]networkingv1.BandwidthRequest, 0, len(bwRequests))
+	reservationInfo := make([]networkingv1.ReservationInfo, 0, len(bwRequests))
+	var usedUlLocal, usedDlLocal, usedUlNetwork, usedDlNetwork int64
 
-    for _, req := range bwRequests {
-        pod, exists := podsWithBw[req.PodUid]
-        if !exists {
-            // pod gone or no bw annotation anymore => drop request
-            continue
-        }
+	for _, req := range bwRequests {
+		pod, exists := podsWithBw[req.PodUid]
+		if !exists {
+			// pod gone or no bw annotation anymore => drop request
+			continue
+		}
 
-        ul, dl := GetBandwidthFromAnnotation(pod)
-        cleanRequests = append(cleanRequests, networkingv1.BandwidthRequest{
-            PodName:   pod.Name,
-            Namespace: pod.Namespace,
-            PodUid:    string(pod.UID),
-            LinkLocal: req.LinkLocal, // scheduler will control this later
-            Bandwidth: networkingv1.BandwidthDefinition{
-                UlMbps: ul,
-                DlMbps: dl,
-            },
-        })
+		ul, dl := r.GetBandwidthFromAnnotation(pod)
+		cleanRequests = append(cleanRequests, networkingv1.BandwidthRequest{
+			PodName:   pod.Name,
+			Namespace: pod.Namespace,
+			PodUid:    string(pod.UID),
+			LinkLocal: req.LinkLocal, // scheduler will control this later
+			Bandwidth: networkingv1.BandwidthDefinition{
+				UlMbps: ul,
+				DlMbps: dl,
+			},
+		})
 
-        workloadRef := GetWorkloadRefFromPod(&pod)
+		workloadRef := GetWorkloadRefFromPod(&pod)
 
-        if req.LinkLocal {
-            usedUlLocal += ul
-            usedDlLocal += dl
-            reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
-                PodName: pod.Name,
-                PodUid:  string(pod.UID),
-                Bandwidth: networkingv1.Capacity{
-                    Local: networkingv1.BandwidthDefinition{UlMbps: ul, DlMbps: dl},
-                },
-                Namespace:      pod.Namespace,
-                DeploymentType: workloadRef.Kind,
-                DeploymentName: workloadRef.Name,
-                DeploymentUid:  workloadRef.UID,
-            })
-        } else {
-            usedUlNetwork += ul
-            usedDlNetwork += dl
-            reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
-                PodName: pod.Name,
-                PodUid:  string(pod.UID),
-                Bandwidth: networkingv1.Capacity{
-                    Network: networkingv1.BandwidthDefinition{UlMbps: ul, DlMbps: dl},
-                },
-                Namespace:      pod.Namespace,
-                DeploymentType: workloadRef.Kind,
-                DeploymentName: workloadRef.Name,
-                DeploymentUid:  workloadRef.UID,
-            })
-        }
-    }
+		if req.LinkLocal {
+			usedUlLocal += ul
+			usedDlLocal += dl
+			reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
+				PodName: pod.Name,
+				PodUid:  string(pod.UID),
+				Bandwidth: networkingv1.Capacity{
+					Local: networkingv1.BandwidthDefinition{UlMbps: ul, DlMbps: dl},
+				},
+				Namespace:      pod.Namespace,
+				DeploymentType: workloadRef.Kind,
+				DeploymentName: workloadRef.Name,
+				DeploymentUid:  workloadRef.UID,
+			})
+		} else {
+			usedUlNetwork += ul
+			usedDlNetwork += dl
+			reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
+				PodName: pod.Name,
+				PodUid:  string(pod.UID),
+				Bandwidth: networkingv1.Capacity{
+					Network: networkingv1.BandwidthDefinition{UlMbps: ul, DlMbps: dl},
+				},
+				Namespace:      pod.Namespace,
+				DeploymentType: workloadRef.Kind,
+				DeploymentName: workloadRef.Name,
+				DeploymentUid:  workloadRef.UID,
+			})
+		}
+	}
 
-    // Compute used/remaining bw (manual changes automatically applied)
-    usedCapacity := networkingv1.Capacity{
-        Local: networkingv1.BandwidthDefinition{
-            UlMbps: usedUlLocal,
-            DlMbps: usedDlLocal,
-        },
-        Network: networkingv1.BandwidthDefinition{
-            UlMbps: usedUlNetwork,
-            DlMbps: usedDlNetwork,
-        },
-    }
+	// Compute used/remaining bw (manual changes automatically applied)
+	usedCapacity := networkingv1.Capacity{
+		Local: networkingv1.BandwidthDefinition{
+			UlMbps: usedUlLocal,
+			DlMbps: usedDlLocal,
+		},
+		Network: networkingv1.BandwidthDefinition{
+			UlMbps: usedUlNetwork,
+			DlMbps: usedDlNetwork,
+		},
+	}
 
-    remainingCapacity := networkingv1.Capacity{
-        Local: networkingv1.BandwidthDefinition{
-            UlMbps: bw.Spec.Capacity.Local.UlMbps - usedUlLocal,
-            DlMbps: bw.Spec.Capacity.Local.DlMbps - usedDlLocal,
-        },
-        Network: networkingv1.BandwidthDefinition{
-            UlMbps: bw.Spec.Capacity.Network.UlMbps - usedUlNetwork,
-            DlMbps: bw.Spec.Capacity.Network.DlMbps - usedDlNetwork,
-        },
-    }
+	remainingCapacity := networkingv1.Capacity{
+		Local: networkingv1.BandwidthDefinition{
+			UlMbps: bw.Spec.Capacity.Local.UlMbps - usedUlLocal,
+			DlMbps: bw.Spec.Capacity.Local.DlMbps - usedDlLocal,
+		},
+		Network: networkingv1.BandwidthDefinition{
+			UlMbps: bw.Spec.Capacity.Network.UlMbps - usedUlNetwork,
+			DlMbps: bw.Spec.Capacity.Network.DlMbps - usedDlNetwork,
+		},
+	}
 
-    bw.Spec.Requests = cleanRequests
-    bw.Status.Used = usedCapacity
-    bw.Status.Remaining = remainingCapacity
-    bw.Status.Reservations = reservationInfo
-    bw.Status.Capacity = bw.Spec.Capacity
-    bw.Status.Status = networkingv1.Created
-    bw.Status.ErrorReason = ""
+	bw.Spec.Requests = cleanRequests
+	bw.Status.Used = usedCapacity
+	bw.Status.Remaining = remainingCapacity
+	bw.Status.Reservations = reservationInfo
+	bw.Status.Capacity = bw.Spec.Capacity
+	bw.Status.Status = networkingv1.Created
+	bw.Status.ErrorReason = ""
 
-    // Update spec (because we changed spec.requests) then status
-    if err := r.Update(ctx, bw); err != nil {
-        return ctrl.Result{}, err
-    }
-    if err := r.UpdateBandwidthStatus(ctx, bw); err != nil {
-        return ctrl.Result{}, err
-    }
+	// Update spec (because we changed spec.requests) then status
+	if err := r.Update(ctx, bw); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.UpdateBandwidthStatus(ctx, bw); err != nil {
+		return ctrl.Result{}, err
+	}
 
-    return ctrl.Result{}, nil
+	return ctrl.Result{}, nil
 }
