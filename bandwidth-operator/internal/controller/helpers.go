@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
@@ -11,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func (r *BandwidthReconciler) generateEvent(event networkingv1.EventVaclabNodeBandwidth, bandwidthResource *networkingv1.Bandwidth) {
@@ -190,4 +192,52 @@ func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Co
 	}
 
 	return nil
+}
+
+func (r *BandwidthReconciler) allSiblingsOnCurrentNode(ctx context.Context, pod *corev1.Pod, nodeName string) (siblingSlice []corev1.Pod, nodes []string, answer bool) {
+	ownerRef := GetWorkloadRefFromPod(pod)
+
+	// If pod has no owner (standalone pod), return only itself
+	if strings.EqualFold(ownerRef.Kind, "Pod") || strings.EqualFold(ownerRef.Kind, "") {
+		nodes = append(nodes, pod.Spec.NodeName)
+		return
+	}
+	nodesMap := make(map[string]string)
+
+	var podList corev1.PodList
+	// List all pods in the same namespace
+	if err := r.List(ctx, &podList, client.InNamespace(pod.Namespace)); err != nil {
+		return
+	}
+
+	// Filter pods that have the same owner
+	var siblingPods, localPods int
+	for _, p := range podList.Items {
+		// Check if this pod has the same owner
+		pOwnerRef := GetWorkloadRefFromPod(&p)
+		// creat list of nodes where siblings are running
+		if strings.EqualFold(pOwnerRef.UID, ownerRef.UID) && !strings.EqualFold(p.Spec.NodeName, nodeName) {
+			// sibling pod on another node
+			// need to inform the node, so that it recomputes its bandwidth usage
+			// by changing the corresponding BW specs and triggering a reconcile
+			nodesMap[p.Spec.NodeName] = p.Spec.NodeName
+		}
+		// Skip pods that are being deleted
+		if p.DeletionTimestamp != nil {
+			continue
+		}
+
+		if strings.EqualFold(pOwnerRef.UID, ownerRef.UID) && strings.EqualFold(pOwnerRef.Kind, ownerRef.Kind) {
+			if strings.EqualFold(p.Spec.NodeName, nodeName) {
+				localPods++
+			}
+			siblingPods++
+			siblingSlice = append(siblingSlice, p)
+		}
+	}
+	if siblingPods > 0 && siblingPods == localPods {
+		answer = true
+	}
+
+	return
 }

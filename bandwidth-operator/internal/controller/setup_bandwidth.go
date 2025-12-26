@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
@@ -132,11 +133,17 @@ func (r *BandwidthReconciler) SetupBandwidthResource(ctx context.Context, bandwi
 				} else {
 					usedUlNetwork += ul
 					usedDlNetwork += dl
+					usedUlLocal += ul
+					usedDlLocal += dl
 					reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
 						PodName: pod.GetName(),
 						PodUid:  string(pod.GetUID()),
 						Bandwidth: networkingv1.Capacity{
 							Network: networkingv1.BandwidthDefinition{
+								UlMbps: ul,
+								DlMbps: dl,
+							},
+							Local: networkingv1.BandwidthDefinition{
 								UlMbps: ul,
 								DlMbps: dl,
 							},
@@ -265,6 +272,161 @@ func (r *BandwidthReconciler) CheckAndUpdateBandwidth(ctx context.Context, bandw
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
+/*func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *networkingv1.Bandwidth) (ctrl.Result, error) {
+	return r.syncFromSpecAndPodsWithVisited(ctx, bw, make(map[string]bool))
+}*/
+
+// syncSingleNodeBandwidth updates a single bandwidth resource without cascading to related nodes
+// Used for background updates triggered by sibling pod changes
+func (r *BandwidthReconciler) syncSingleNodeBandwidth(ctx context.Context, bw *networkingv1.Bandwidth) error {
+	log := log.FromContext(ctx)
+	nodeName := bw.Spec.Node
+
+	// Validate node exists
+	var node corev1.Node
+	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Node not found, deleting Bandwidth", "node", nodeName)
+			_ = r.Delete(ctx, bw)
+			return nil
+		}
+		return err
+	}
+
+	// Set defaults
+	r.setDefaultBandwidthValues(bw)
+
+	// List pods on the node
+	var podList corev1.PodList
+	if err := r.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
+		return err
+	}
+
+	// Build map of pods with bandwidth annotations
+	podsWithBw := make(map[string]corev1.Pod)
+	for _, pod := range podList.Items {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if _, ok := pod.Annotations[r.Config.EgressBandwidthAnnotation]; ok {
+			podsWithBw[string(pod.UID)] = pod
+			continue
+		}
+		if _, ok := pod.Annotations[r.Config.IngressBandwidthAnnotation]; ok {
+			podsWithBw[string(pod.UID)] = pod
+			continue
+		}
+	}
+
+	// Recompute bandwidth
+	bwRequests := bw.Spec.Requests
+	cleanRequests := make([]networkingv1.BandwidthRequest, 0, len(bwRequests))
+	reservationInfo := make([]networkingv1.ReservationInfo, 0, len(bwRequests))
+	var usedUlLocal, usedDlLocal, usedUlNetwork, usedDlNetwork int64
+
+	// Cache sibling lookups
+	type siblingCacheEntry struct {
+		isLocal bool
+	}
+	siblingCache := make(map[string]siblingCacheEntry)
+
+	for _, req := range bwRequests {
+		pod, exists := podsWithBw[req.PodUid]
+		if !exists {
+			log.V(1).Info("dropping request for missing pod", "podUid", req.PodUid, "podName", req.PodName)
+			continue
+		}
+
+		ul, dl := r.GetBandwidthFromAnnotation(pod)
+		usedUlLocal += ul
+		usedDlLocal += dl
+
+		var nUl, nDl int64
+		linkLocal := false
+
+		workloadRef := GetWorkloadRefFromPod(&pod)
+		ownerUID := workloadRef.UID
+
+		var isLocal bool
+		if cached, ok := siblingCache[ownerUID]; ok {
+			isLocal = cached.isLocal
+		} else {
+			_, _, localResult := r.allSiblingsOnCurrentNode(ctx, &pod, nodeName)
+			isLocal = localResult
+			siblingCache[ownerUID] = siblingCacheEntry{isLocal: isLocal}
+		}
+
+		if !isLocal {
+			nUl = ul
+			nDl = dl
+		} else {
+			linkLocal = true
+		}
+
+		cleanRequests = append(cleanRequests, networkingv1.BandwidthRequest{
+			PodName:   pod.Name,
+			Namespace: pod.Namespace,
+			PodUid:    string(pod.UID),
+			LinkLocal: linkLocal,
+			Bandwidth: networkingv1.BandwidthDefinition{
+				UlMbps: ul,
+				DlMbps: dl,
+			},
+		})
+
+		usedUlNetwork += nUl
+		usedDlNetwork += nDl
+
+		reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
+			PodName: pod.Name,
+			PodUid:  string(pod.UID),
+			Bandwidth: networkingv1.Capacity{
+				Local:   networkingv1.BandwidthDefinition{UlMbps: ul, DlMbps: dl},
+				Network: networkingv1.BandwidthDefinition{UlMbps: nUl, DlMbps: nDl},
+			},
+			Namespace:      pod.Namespace,
+			DeploymentType: workloadRef.Kind,
+			DeploymentName: workloadRef.Name,
+			DeploymentUid:  workloadRef.UID,
+		})
+	}
+
+	// Update spec and status
+	bw.Spec.Requests = cleanRequests
+	bw.Status.Used = networkingv1.Capacity{
+		Local:   networkingv1.BandwidthDefinition{UlMbps: usedUlLocal, DlMbps: usedDlLocal},
+		Network: networkingv1.BandwidthDefinition{UlMbps: usedUlNetwork, DlMbps: usedDlNetwork},
+	}
+	bw.Status.Remaining = networkingv1.Capacity{
+		Local: networkingv1.BandwidthDefinition{
+			UlMbps: bw.Spec.Capacity.Local.UlMbps - usedUlLocal,
+			DlMbps: bw.Spec.Capacity.Local.DlMbps - usedDlLocal,
+		},
+		Network: networkingv1.BandwidthDefinition{
+			UlMbps: bw.Spec.Capacity.Network.UlMbps - usedUlNetwork,
+			DlMbps: bw.Spec.Capacity.Network.DlMbps - usedDlNetwork,
+		},
+	}
+	bw.Status.Reservations = reservationInfo
+	bw.Status.Capacity = bw.Spec.Capacity
+	bw.Status.Status = networkingv1.Created
+	bw.Status.ErrorReason = ""
+	bw.Status.UpdatedAt = metav1.NewTime(time.Now())
+
+	if err := r.Update(ctx, bw); err != nil {
+		return err
+	}
+	if err := r.UpdateBandwidthStatus(ctx, bw); err != nil {
+		return err
+	}
+
+	log.V(1).Info("single node bandwidth updated", "node", nodeName, "requests", len(cleanRequests))
+	return nil
+}
+
 func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *networkingv1.Bandwidth) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
@@ -336,59 +498,148 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 	cleanRequests := make([]networkingv1.BandwidthRequest, 0, len(bwRequests))
 	reservationInfo := make([]networkingv1.ReservationInfo, 0, len(bwRequests))
 	var usedUlLocal, usedDlLocal, usedUlNetwork, usedDlNetwork int64
+	relatedNodesMaps := make(map[string]*networkingv1.Bandwidth)
+	affectedRelatedNodes := make(map[string]bool) // Track which related nodes need updates
+	wgSlice := []*sync.WaitGroup{}
+	relatedNodesMutex := &sync.Mutex{}
+
+	// Build map of existing requests for comparison
+	existingReqs := make(map[string]networkingv1.BandwidthRequest)
+	for _, req := range bw.Spec.Requests {
+		existingReqs[req.PodUid] = req
+	}
+
+	// Cache sibling lookups per owner UID to avoid redundant API calls
+	type siblingCacheEntry struct {
+		siblings []corev1.Pod
+		nodes    []string
+		isLocal  bool
+	}
+	siblingCache := make(map[string]siblingCacheEntry)
 
 	for _, req := range bwRequests {
 		pod, exists := podsWithBw[req.PodUid]
 		if !exists {
-			// pod gone or no bw annotation anymore => drop request
-			log.Info("dropping request for missing pod", "podUid", req.PodUid, "podName", req.PodName)
+			// Pod gone or no bw annotation anymore => drop request
+			// Check if this pod had siblings on other nodes - they need updates
+			if oldReq, hadRequest := existingReqs[req.PodUid]; hadRequest {
+				log.Info("dropping request for missing pod", "podUid", req.PodUid, "podName", req.PodName)
+				// If pod was part of a workload with siblings, mark related nodes as affected
+				// We need to fetch sibling info to know which nodes to notify
+				// Use a best-effort approach: get pod from old request data if possible
+				var oldPod corev1.Pod
+				if err := r.Get(ctx, types.NamespacedName{Name: oldReq.PodName, Namespace: oldReq.Namespace}, &oldPod); err == nil {
+					_, nodes, _ := r.allSiblingsOnCurrentNode(ctx, &oldPod, nodeName)
+					for _, n := range nodes {
+						if !strings.EqualFold(n, nodeName) {
+							affectedRelatedNodes[n] = true
+						}
+					}
+				}
+			}
 			continue
 		}
 
 		ul, dl := r.GetBandwidthFromAnnotation(pod)
-		//log.Info("parsed bandwidth from pod", "pod", pod.Name, "namespace", pod.Namespace, "ul", ul, "dl", dl)
-		cleanRequests = append(cleanRequests, networkingv1.BandwidthRequest{
+		// local bandwidth is always used
+		// since pods are always connected to virtual bridge
+		usedUlLocal += ul
+		usedDlLocal += dl
+
+		var nUl, nDl int64
+		linkLocal := false
+
+		// Check if we already computed siblings for this workload
+		workloadRef := GetWorkloadRefFromPod(&pod)
+		ownerUID := workloadRef.UID
+
+		var nodes []string
+		var isLocal bool
+		if cached, ok := siblingCache[ownerUID]; ok {
+			// Use cached result
+			nodes = cached.nodes
+			isLocal = cached.isLocal
+			log.V(2).Info("using cached sibling info", "pod", pod.Name, "ownerUID", ownerUID)
+		} else {
+			// Compute and cache sibling info
+			siblings, nodeList, localResult := r.allSiblingsOnCurrentNode(ctx, &pod, nodeName)
+			nodes = nodeList
+			isLocal = localResult
+			siblingCache[ownerUID] = siblingCacheEntry{
+				siblings: siblings,
+				nodes:    nodes,
+				isLocal:  isLocal,
+			}
+			log.V(2).Info("computed and cached sibling info", "pod", pod.Name, "ownerUID", ownerUID, "siblingCount", len(siblings))
+		}
+
+		if !isLocal {
+			nUl = ul
+			nDl = dl
+		} else {
+			linkLocal = true
+		}
+
+		// Check if this specific request changed - if so, mark related nodes as affected
+		newReq := networkingv1.BandwidthRequest{
 			PodName:   pod.Name,
 			Namespace: pod.Namespace,
 			PodUid:    string(pod.UID),
-			LinkLocal: req.LinkLocal, // scheduler will control this later
+			LinkLocal: linkLocal,
 			Bandwidth: networkingv1.BandwidthDefinition{
 				UlMbps: ul,
 				DlMbps: dl,
 			},
+		}
+
+		if oldReq, existed := existingReqs[req.PodUid]; !existed || oldReq != newReq {
+			// This request is new or changed - mark related nodes as affected
+			log.V(2).Info("request changed, marking related nodes as affected", "pod", pod.Name, "relatedNodes", len(nodes))
+			for _, n := range nodes {
+				if !strings.EqualFold(n, nodeName) {
+					affectedRelatedNodes[n] = true
+				}
+			}
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		wgSlice = append(wgSlice, &wg)
+		go func() {
+			defer wg.Done()
+			relatedNodesMutex.Lock()
+			defer relatedNodesMutex.Unlock()
+			for _, n := range nodes {
+				if strings.EqualFold(n, nodeName) { // no need to notify current node
+					continue
+				}
+				if _, found := relatedNodesMaps[n]; !found {
+					var relatedBw networkingv1.Bandwidth
+					if err := r.Get(ctx, types.NamespacedName{Name: n}, &relatedBw); err == nil {
+						relatedNodesMaps[n] = &relatedBw
+					}
+				}
+			}
+		}()
+
+		cleanRequests = append(cleanRequests, newReq)
+
+		usedUlNetwork += nUl
+		usedDlNetwork += nDl
+
+		reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
+			PodName: pod.Name,
+			PodUid:  string(pod.UID),
+			Bandwidth: networkingv1.Capacity{
+				Local:   networkingv1.BandwidthDefinition{UlMbps: ul, DlMbps: dl},
+				Network: networkingv1.BandwidthDefinition{UlMbps: nUl, DlMbps: nDl},
+			},
+			Namespace:      pod.Namespace,
+			DeploymentType: workloadRef.Kind,
+			DeploymentName: workloadRef.Name,
+			DeploymentUid:  workloadRef.UID,
 		})
 
-		workloadRef := GetWorkloadRefFromPod(&pod)
-
-		if req.LinkLocal {
-			usedUlLocal += ul
-			usedDlLocal += dl
-			reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
-				PodName: pod.Name,
-				PodUid:  string(pod.UID),
-				Bandwidth: networkingv1.Capacity{
-					Local: networkingv1.BandwidthDefinition{UlMbps: ul, DlMbps: dl},
-				},
-				Namespace:      pod.Namespace,
-				DeploymentType: workloadRef.Kind,
-				DeploymentName: workloadRef.Name,
-				DeploymentUid:  workloadRef.UID,
-			})
-		} else {
-			usedUlNetwork += ul
-			usedDlNetwork += dl
-			reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
-				PodName: pod.Name,
-				PodUid:  string(pod.UID),
-				Bandwidth: networkingv1.Capacity{
-					Network: networkingv1.BandwidthDefinition{UlMbps: ul, DlMbps: dl},
-				},
-				Namespace:      pod.Namespace,
-				DeploymentType: workloadRef.Kind,
-				DeploymentName: workloadRef.Name,
-				DeploymentUid:  workloadRef.UID,
-			})
-		}
 	}
 
 	// Compute used/remaining bw (manual changes automatically applied)
@@ -416,12 +667,8 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 
 	// Check if spec.requests changed by comparing as sets (order-independent)
 	specChanged := (len(bw.Spec.Requests) != len(cleanRequests)) || (bw.Spec.Capacity != bw.Status.Capacity)
+
 	if !specChanged {
-		// Build map of existing requests by PodUid for comparison
-		existingReqs := make(map[string]networkingv1.BandwidthRequest)
-		for _, req := range bw.Spec.Requests {
-			existingReqs[req.PodUid] = req
-		}
 		// Check if all clean requests match existing ones
 		for _, newReq := range cleanRequests {
 			oldReq, exists := existingReqs[newReq.PodUid]
@@ -432,7 +679,8 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 		}
 	}
 
-	bw.Spec.Requests = cleanRequests // Check if status actually changed before updating
+	bw.Spec.Requests = cleanRequests
+	// Check if status actually changed before updating
 	statusChanged := bw.Status.Used != usedCapacity ||
 		bw.Status.Remaining != remainingCapacity ||
 		bw.Status.Capacity != bw.Spec.Capacity ||
@@ -447,7 +695,13 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 	bw.Status.Status = networkingv1.Created
 	bw.Status.ErrorReason = ""
 
-	// Update spec only if it changed
+	// wait for related nodes fetching
+	for _, wg := range wgSlice {
+		wg.Wait()
+	}
+
+	// Update current node FIRST before notifying related nodes
+	// This makes the current node's state consistent as fast as possible
 	if specChanged {
 		if err := r.Update(ctx, bw); err != nil {
 			return ctrl.Result{}, err
@@ -462,9 +716,29 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 			return ctrl.Result{}, err
 		}
 		log.Info("bandwidth status updated", "node", nodeName, "used_local_ul", usedUlLocal, "used_local_dl", usedDlLocal, "used_network_ul", usedUlNetwork, "used_network_dl", usedDlNetwork, "remaining_local_ul", remainingCapacity.Local.UlMbps, "remaining_local_dl", remainingCapacity.Local.DlMbps, "remaining_network_ul", remainingCapacity.Network.UlMbps, "remaining_network_dl", remainingCapacity.Network.DlMbps, "requests", len(cleanRequests))
-	} /*else {
-		log.V(1).Info("bandwidth unchanged, skipping status update", "node", nodeName)
-	}*/
+	}
+
+	// Sync ONLY the specific related nodes that are affected by request changes
+	// This is more efficient than syncing all related nodes
+	if len(affectedRelatedNodes) > 0 {
+		// Use simple single-node sync function to avoid cascading updates
+		go func() {
+			for relatedNodeName := range affectedRelatedNodes {
+				// Only sync if we have the bandwidth object for this node
+				if relatedBw, found := relatedNodesMaps[relatedNodeName]; found {
+					log.V(1).Info("syncing affected related node in background", "node", relatedNodeName)
+					if err := r.syncSingleNodeBandwidth(context.Background(), relatedBw); err != nil {
+						log.V(1).Info("failed to sync related node", "node", relatedNodeName, "error", err)
+					} else {
+						log.V(1).Info("synced related node", "node", relatedNodeName)
+					}
+				}
+			}
+		}()
+		log.V(1).Info("triggered background sync for affected related nodes", "node", nodeName, "affectedCount", len(affectedRelatedNodes))
+	} else if len(relatedNodesMaps) > 0 {
+		log.V(2).Info("skipping related node sync (no affected nodes)", "node", nodeName, "totalRelatedNodes", len(relatedNodesMaps))
+	}
 
 	return ctrl.Result{}, nil
 }

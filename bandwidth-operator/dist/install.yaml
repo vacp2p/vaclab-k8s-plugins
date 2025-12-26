@@ -658,7 +658,7 @@ spec:
         - --ingress-bandwidth-annotation=ovn.kubernetes.io/ingress_rate
         command:
         - /manager
-        image: katakuri100/vaclab-bandwidth-operator:v0.1.7
+        image: katakuri100/vaclab-bandwidth-operator:v0.1.8
         livenessProbe:
           httpGet:
             path: /healthz
