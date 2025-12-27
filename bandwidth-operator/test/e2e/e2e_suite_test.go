@@ -28,7 +28,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/test/utils"
+	"github.com/vacp2p/vaclab-k8s-plugins/test/utils"
 )
 
 var (

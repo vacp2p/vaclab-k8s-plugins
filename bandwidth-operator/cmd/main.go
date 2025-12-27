@@ -35,8 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/api/v1"
-	"github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/internal/controller"
+	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
+	"github.com/vacp2p/vaclab-k8s-plugins/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 

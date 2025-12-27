@@ -32,7 +32,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/api/v1"
+	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
 	// +kubebuilder:scaffold:imports
 )
 
