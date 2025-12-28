@@ -279,3 +279,28 @@ type SySchedArgs struct {
 	// CR name of the default profile for all system calls
 	DefaultProfileName string
 }
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// VaclabSchedulingArgs defines the parameters for VacLab bandwidth-aware scheduling plugin.
+type VaclabSchedulingArgs struct {
+	metav1.TypeMeta
+
+	// EgressBandwidthAnnotation is the annotation key for egress bandwidth
+	// Default: "kubernetes.io/egress-bandwidth"
+	// KubeOVN: "ovn.kubernetes.io/egress_rate"
+	EgressBandwidthAnnotation string `json:"egressBandwidthAnnotation,omitempty"`
+
+	// IngressBandwidthAnnotation is the annotation key for ingress bandwidth
+	// Default: "kubernetes.io/ingress-bandwidth"
+	// KubeOVN: "ovn.kubernetes.io/ingress_rate"
+	IngressBandwidthAnnotation string `json:"ingressBandwidthAnnotation,omitempty"`
+
+	// DefaultEgressMbps is the default egress bandwidth in Mbps when no annotation is found
+	// Default: 0 (no default applied)
+	DefaultEgressMbps int64 `json:"defaultEgressMbps,omitempty"`
+
+	// DefaultIngressMbps is the default ingress bandwidth in Mbps when no annotation is found
+	// Default: 0 (no default applied)
+	DefaultIngressMbps int64 `json:"defaultIngressMbps,omitempty"`
+}

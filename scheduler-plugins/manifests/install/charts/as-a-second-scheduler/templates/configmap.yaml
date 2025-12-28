@@ -16,6 +16,27 @@ data:
     # Compose all plugins in one profile
     - schedulerName: {{ .Values.scheduler.name }}
       plugins:
+        {{- if has "VaclabScheduling" .Values.plugins.enabled }}
+        preFilter:
+          enabled:
+          - name: VaclabScheduling
+        filter:
+          enabled:
+          - name: VaclabScheduling
+        score:
+          enabled:
+          - name: VaclabScheduling
+            weight: 10
+        reserve:
+          enabled:
+          - name: VaclabScheduling
+        preBind:
+          enabled:
+          - name: VaclabScheduling
+        postBind:
+          enabled:
+          - name: VaclabScheduling
+        {{- else }}
         multiPoint:
           enabled:
           {{- range $.Values.plugins.enabled }}
@@ -25,6 +46,7 @@ data:
           {{- range $.Values.plugins.disabled }}
           - name: {{ title . }}
           {{- end }}
+        {{- end }}
       {{- if $.Values.pluginConfig }}
       pluginConfig: {{ toYaml $.Values.pluginConfig | nindent 6 }}
       {{- end }}
