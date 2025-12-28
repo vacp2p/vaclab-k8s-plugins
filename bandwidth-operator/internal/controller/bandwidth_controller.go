@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	//networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
-	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
+	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"

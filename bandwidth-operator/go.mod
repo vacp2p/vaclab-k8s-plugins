@@ -1,4 +1,4 @@
-module github.com/vacp2p/vaclab-k8s-plugins
+module github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator
 
 go 1.24.6
 

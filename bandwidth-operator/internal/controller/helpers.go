@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
+	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
