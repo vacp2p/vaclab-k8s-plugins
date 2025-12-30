@@ -1,0 +1,356 @@
+{{- if .Values.crd.enable }}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+    annotations:
+        controller-gen.kubebuilder.io/version: v0.19.0
+    name: bandwidths.networking.vaclab.org
+spec:
+    group: networking.vaclab.org
+    names:
+        kind: Bandwidth
+        listKind: BandwidthList
+        plural: bandwidths
+        singular: bandwidth
+    scope: Cluster
+    versions:
+        - additionalPrinterColumns:
+            - jsonPath: .spec.node
+              name: Node
+              type: string
+            - jsonPath: .spec.capacity.network.ulMbps
+              name: UL
+              type: integer
+            - jsonPath: .spec.capacity.network.dlMbps
+              name: DL
+              type: integer
+            - jsonPath: .status.used.network.ulMbps
+              name: uUL
+              type: integer
+            - jsonPath: .status.used.network.dlMbps
+              name: uDL
+              type: integer
+            - jsonPath: .status.capacity.local.ulMbps
+              name: LUL
+              type: integer
+            - jsonPath: .status.capacity.local.dlMbps
+              name: uLDL
+              type: integer
+            - jsonPath: .status.used.local.ulMbps
+              name: uLUL
+              type: integer
+            - jsonPath: .status.used.local.dlMbps
+              name: uLDL
+              type: integer
+            - jsonPath: .status.status
+              name: State
+              type: string
+            - jsonPath: .metadata.creationTimestamp
+              name: Age
+              type: date
+          name: v1
+          schema:
+            openAPIV3Schema:
+                description: Bandwidth is the Schema for the bandwidths API
+                properties:
+                    apiVersion:
+                        description: |-
+                            APIVersion defines the versioned schema of this representation of an object.
+                            Servers should convert recognized schemas to the latest internal value, and
+                            may reject unrecognized values.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+                        type: string
+                    kind:
+                        description: |-
+                            Kind is a string value representing the REST resource this object represents.
+                            Servers may infer this from the endpoint the client submits requests to.
+                            Cannot be updated.
+                            In CamelCase.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                        type: string
+                    metadata:
+                        type: object
+                    spec:
+                        description: spec defines the desired state of Bandwidth
+                        properties:
+                            capacity:
+                                description: The max capacity defined in this bandwidth resource
+                                properties:
+                                    local:
+                                        description: local datapath (ovs/linux-bridge) bandwidth within the host
+                                        properties:
+                                            dlMbps:
+                                                description: Downlink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                            ulMbps:
+                                                description: Uplink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                        required:
+                                            - dlMbps
+                                            - ulMbps
+                                        type: object
+                                    network:
+                                        description: network bandwidth (via physical ethernet interface)
+                                        properties:
+                                            dlMbps:
+                                                description: Downlink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                            ulMbps:
+                                                description: Uplink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                        required:
+                                            - dlMbps
+                                            - ulMbps
+                                        type: object
+                                type: object
+                            node:
+                                description: The node this bandwidth resource applies to
+                                type: string
+                            requests:
+                                description: List of Bandwidth requests
+                                items:
+                                    properties:
+                                        bandwidth:
+                                            description: requested bandwidth
+                                            properties:
+                                                dlMbps:
+                                                    description: Downlink bandwidth in Mbps
+                                                    format: int64
+                                                    type: integer
+                                                ulMbps:
+                                                    description: Uplink bandwidth in Mbps
+                                                    format: int64
+                                                    type: integer
+                                            required:
+                                                - dlMbps
+                                                - ulMbps
+                                            type: object
+                                        linkLocal:
+                                            description: If the request is for local datapath
+                                            type: boolean
+                                        namespace:
+                                            description: namespace
+                                            type: string
+                                        podName:
+                                            description: pod name
+                                            type: string
+                                        podUid:
+                                            description: pod uid
+                                            type: string
+                                    required:
+                                        - podUid
+                                    type: object
+                                type: array
+                            status:
+                                description: The current status of this bandwidth resource
+                                enum:
+                                    - Created
+                                    - Creating
+                                    - Error
+                                    - Deleting
+                                    - Deleted
+                                    - None
+                                type: string
+                        required:
+                            - capacity
+                            - node
+                        type: object
+                    status:
+                        description: status defines the observed state of Bandwidth
+                        properties:
+                            capacity:
+                                description: The max capacity defined in this bandwidth resource
+                                properties:
+                                    local:
+                                        description: local datapath (ovs/linux-bridge) bandwidth within the host
+                                        properties:
+                                            dlMbps:
+                                                description: Downlink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                            ulMbps:
+                                                description: Uplink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                        required:
+                                            - dlMbps
+                                            - ulMbps
+                                        type: object
+                                    network:
+                                        description: network bandwidth (via physical ethernet interface)
+                                        properties:
+                                            dlMbps:
+                                                description: Downlink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                            ulMbps:
+                                                description: Uplink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                        required:
+                                            - dlMbps
+                                            - ulMbps
+                                        type: object
+                                type: object
+                            errorReason:
+                                type: string
+                            remaining:
+                                description: Remaining bandwidth
+                                properties:
+                                    local:
+                                        description: local datapath (ovs/linux-bridge) bandwidth within the host
+                                        properties:
+                                            dlMbps:
+                                                description: Downlink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                            ulMbps:
+                                                description: Uplink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                        required:
+                                            - dlMbps
+                                            - ulMbps
+                                        type: object
+                                    network:
+                                        description: network bandwidth (via physical ethernet interface)
+                                        properties:
+                                            dlMbps:
+                                                description: Downlink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                            ulMbps:
+                                                description: Uplink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                        required:
+                                            - dlMbps
+                                            - ulMbps
+                                        type: object
+                                type: object
+                            reservations:
+                                description: List of current reservations
+                                items:
+                                    properties:
+                                        bandwidth:
+                                            description: reserved bandwidth
+                                            properties:
+                                                local:
+                                                    description: local datapath (ovs/linux-bridge) bandwidth within the host
+                                                    properties:
+                                                        dlMbps:
+                                                            description: Downlink bandwidth in Mbps
+                                                            format: int64
+                                                            type: integer
+                                                        ulMbps:
+                                                            description: Uplink bandwidth in Mbps
+                                                            format: int64
+                                                            type: integer
+                                                    required:
+                                                        - dlMbps
+                                                        - ulMbps
+                                                    type: object
+                                                network:
+                                                    description: network bandwidth (via physical ethernet interface)
+                                                    properties:
+                                                        dlMbps:
+                                                            description: Downlink bandwidth in Mbps
+                                                            format: int64
+                                                            type: integer
+                                                        ulMbps:
+                                                            description: Uplink bandwidth in Mbps
+                                                            format: int64
+                                                            type: integer
+                                                    required:
+                                                        - dlMbps
+                                                        - ulMbps
+                                                    type: object
+                                            type: object
+                                        deploymentName:
+                                            description: deployment name
+                                            type: string
+                                        deploymentType:
+                                            description: deployment type statefulset/job/deployment/others
+                                            type: string
+                                        deploymentUid:
+                                            description: Deployment uid
+                                            type: string
+                                        ip:
+                                            description: pod ip
+                                            type: string
+                                        namespace:
+                                            description: namespace
+                                            type: string
+                                        podName:
+                                            description: pod name
+                                            type: string
+                                        podUid:
+                                            description: pod uid
+                                            type: string
+                                    required:
+                                        - bandwidth
+                                        - namespace
+                                        - podUid
+                                    type: object
+                                type: array
+                            status:
+                                default: None
+                                enum:
+                                    - Created
+                                    - Creating
+                                    - Error
+                                    - Deleting
+                                    - Deleted
+                                    - None
+                                type: string
+                            updatedAt:
+                                description: Last updated time
+                                format: date-time
+                                type: string
+                            used:
+                                description: Consumed bandwidth
+                                properties:
+                                    local:
+                                        description: local datapath (ovs/linux-bridge) bandwidth within the host
+                                        properties:
+                                            dlMbps:
+                                                description: Downlink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                            ulMbps:
+                                                description: Uplink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                        required:
+                                            - dlMbps
+                                            - ulMbps
+                                        type: object
+                                    network:
+                                        description: network bandwidth (via physical ethernet interface)
+                                        properties:
+                                            dlMbps:
+                                                description: Downlink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                            ulMbps:
+                                                description: Uplink bandwidth in Mbps
+                                                format: int64
+                                                type: integer
+                                        required:
+                                            - dlMbps
+                                            - ulMbps
+                                        type: object
+                                type: object
+                        type: object
+                required:
+                    - spec
+                type: object
+          served: true
+          storage: true
+          subresources:
+            status: {}
+{{- end }}

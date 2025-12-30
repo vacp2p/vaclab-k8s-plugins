@@ -1,0 +1,55 @@
+{{- if .Values.plugins.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scheduler-config
+  namespace: {{ .Release.Namespace }}
+data:
+  scheduler-config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: {{ .Values.scheduler.leaderElect }}
+      resourceNamespace: {{ .Release.Namespace }}
+      resourceName: {{ .Values.scheduler.name }}
+    profiles:
+    # Compose all plugins in one profile
+    - schedulerName: {{ .Values.scheduler.name }}
+      plugins:
+        {{- if has "VaclabScheduling" .Values.plugins.enabled }}
+        preFilter:
+          enabled:
+          - name: VaclabScheduling
+        filter:
+          enabled:
+          - name: VaclabScheduling
+        score:
+          enabled:
+          - name: VaclabScheduling
+            weight: 10
+        reserve:
+          enabled:
+          - name: VaclabScheduling
+        preBind:
+          enabled:
+          - name: VaclabScheduling
+        postBind:
+          enabled:
+          - name: VaclabScheduling
+        {{- else }}
+        multiPoint:
+          enabled:
+          {{- range $.Values.plugins.enabled }}
+          - name: {{ title . }}
+          {{- end }}
+          disabled:
+          {{- range $.Values.plugins.disabled }}
+          - name: {{ title . }}
+          {{- end }}
+        {{- end }}
+      {{- if $.Values.pluginConfig }}
+      pluginConfig: {{ toYaml $.Values.pluginConfig | nindent 6 }}
+      {{- end }}
+
+  {{- /* TODO: wire CRD installation with enabled plugins. */}}
+{{- end }}

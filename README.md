@@ -61,10 +61,33 @@ The Vaclab Bandwidth Operator introduces a new Kubernetes Custom Resource named 
 
 - Kubernetes cluster v1.11.3+
 - kubectl configured with cluster access
+- Helm 3.8+ (for Helm installation)
 - Docker v17.03+
 - Go v1.24.6+ (for building from source)
 
-#### Quick Install
+#### Install via Helm (Recommended)
+
+Install directly from OCI registry:
+
+```bash
+helm install vaclab-bandwidth-operator \
+  oci://ghcr.io/vacp2p/vaclab-bandwidth-operator \
+  -n vaclab-system --create-namespace
+```
+
+With custom configuration:
+
+```bash
+helm install vaclab-bandwidth-operator \
+  oci://ghcr.io/vacp2p/vaclab-bandwidth-operator \
+  -n vaclab-system --create-namespace \
+  --set manager.bandwidth.network.uplink=10000 \
+  --set manager.annotations.egress="kubernetes.io/egress-bandwidth"
+```
+
+See [Helm Publishing Guide](./docs/HELM_PUBLISHING.md) and [Chart README](./bandwidth-operator/dist/chart/README.md) for more options.
+
+#### Quick Install (Manifest)
 
 Use the pre-built installer manifest:
 

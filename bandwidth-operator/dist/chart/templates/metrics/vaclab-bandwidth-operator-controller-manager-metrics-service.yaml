@@ -1,0 +1,20 @@
+{{- if .Values.metrics.enable }}
+apiVersion: v1
+kind: Service
+metadata:
+    labels:
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/name: bandwidth-operator
+        control-plane: controller-manager
+    name: vaclab-bandwidth-operator-controller-manager-metrics-service
+    namespace: vaclab-system
+spec:
+    ports:
+        - name: https
+          port: {{ .Values.metrics.port }}
+          protocol: TCP
+          targetPort: {{ .Values.metrics.port }}
+    selector:
+        app.kubernetes.io/name: bandwidth-operator
+        control-plane: controller-manager
+{{- end }}

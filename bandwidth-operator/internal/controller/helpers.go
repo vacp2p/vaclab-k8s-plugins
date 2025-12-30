@@ -2,15 +2,17 @@ package controller
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"time"
 
-	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
+	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/api/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func (r *BandwidthReconciler) generateEvent(event networkingv1.EventVaclabNodeBandwidth, bandwidthResource *networkingv1.Bandwidth) {
@@ -43,35 +45,58 @@ func (r *BandwidthReconciler) generateEvent(event networkingv1.EventVaclabNodeBa
 
 func (r *BandwidthReconciler) setDefaultBandwidthValues(bandwidth *networkingv1.Bandwidth) {
 	if bandwidth.Spec.Capacity.Local.UlMbps == 0 {
-		bandwidth.Spec.Capacity.Local.UlMbps = DEFAULT_LOCAL_UL_BANDWIDTH_MBPS
+		bandwidth.Spec.Capacity.Local.UlMbps = r.Config.DefaultLocalUL
 	}
 	if bandwidth.Spec.Capacity.Local.DlMbps == 0 {
-		bandwidth.Spec.Capacity.Local.DlMbps = DEFAULT_LOCAL_DL_BANDWIDTH_MBPS
+		bandwidth.Spec.Capacity.Local.DlMbps = r.Config.DefaultLocalDL
 	}
 	if bandwidth.Spec.Capacity.Network.UlMbps == 0 {
-		bandwidth.Spec.Capacity.Network.UlMbps = DEFAULT_NETWORK_UL_BANDWIDTH_MBPS
+		bandwidth.Spec.Capacity.Network.UlMbps = r.Config.DefaultNetworkUL
 	}
 	if bandwidth.Spec.Capacity.Network.DlMbps == 0 {
-		bandwidth.Spec.Capacity.Network.DlMbps = DEFAULT_NETWORK_DL_BANDWIDTH_MBPS
+		bandwidth.Spec.Capacity.Network.DlMbps = r.Config.DefaultNetworkDL
 	}
 }
 
 func (r *BandwidthReconciler) UpdateBandwidthStatus(ctx context.Context, bandwidth *networkingv1.Bandwidth) error {
-	bandwidth.Status.UpdatedAt = metav1.NewTime(time.Now())
-	return r.Status().Update(ctx, bandwidth)
+	// UpdatedAt is set by caller only when status actually changes
+	err := r.Status().Update(ctx, bandwidth)
+	// If conflict, return without error to allow retry
+	if errors.IsConflict(err) {
+		return nil
+	}
+	return err
 }
 
-func GetBandwidthFromAnnotation(pod corev1.Pod) (ul int64, dl int64) {
-	egress, _ := pod.Annotations["kubernetes.io/egress-bandwidth"]
-	ingress, _ := pod.Annotations["kubernetes.io/ingress-bandwidth"]
-	if qEgress, err := resource.ParseQuantity(egress); err == nil {
-		ul = qEgress.Value() / (1000000) // convert from bytes to megabits
-	}
-	if qIngress, err := resource.ParseQuantity(ingress); err == nil {
-		dl = qIngress.Value() / (1000000) // convert from bytes to megabits
-	}
-	return
+func (r *BandwidthReconciler) GetBandwidthFromAnnotation(pod corev1.Pod) (ul int64, dl int64) {
+	egress, _ := pod.Annotations[r.Config.EgressBandwidthAnnotation]
+	ingress, _ := pod.Annotations[r.Config.IngressBandwidthAnnotation]
 
+	// Parse egress bandwidth
+	if egress != "" {
+		// Try parsing as plain integer first (KubeOVN format: just "20" means 20 Mbps)
+		if plainValue, err := strconv.Atoi(egress); err == nil {
+			ul = int64(plainValue)
+		} else if qEgress, err := resource.ParseQuantity(egress); err == nil {
+			// Parse as Kubernetes Quantity (e.g., "100M", "1G")
+			// Convert from bytes to Mbps
+			ul = (qEgress.Value()) / 1000000
+		}
+	}
+
+	// Parse ingress bandwidth
+	if ingress != "" {
+		// Try parsing as plain integer first (KubeOVN format: just "20" means 20 Mbps)
+		if plainValue, err := strconv.Atoi(ingress); err == nil {
+			dl = int64(plainValue)
+		} else if qIngress, err := resource.ParseQuantity(ingress); err == nil {
+			// Parse as Kubernetes Quantity (e.g., "100M", "1G")
+			// Convert from bytes to Mbps
+			dl = (qIngress.Value()) / 1000000
+		}
+	}
+
+	return
 }
 
 // WorkloadRef is a small struct to transport workload metadata
@@ -124,7 +149,7 @@ func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Co
 		var existing networkingv1.Bandwidth
 		if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &existing); err == nil {
 			continue
-		} else if err != nil && !apierrors.IsNotFound(err) {
+		} else if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
 
@@ -139,15 +164,80 @@ func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Co
 		}
 
 		r.setDefaultBandwidthValues(&bw)
-		controllerutil.AddFinalizer(&bw, FinalizerName)
+
 		if err := r.Create(ctx, &bw); err != nil {
 			// tolerate race
-			if apierrors.IsAlreadyExists(err) {
+			if errors.IsAlreadyExists(err) {
 				continue
 			}
 			return err
 		}
+
+		// Now update the status after creation
+		// Re-get the object to get the latest version
+		if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &bw); err != nil {
+			return err
+		}
+
+		bw.Status.Status = networkingv1.Created
+		bw.Status.Capacity = bw.Spec.Capacity
+		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
+
+		if err := r.UpdateBandwidthStatus(ctx, &bw); err != nil {
+			return err
+		}
+
+		// Generate event
+		r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
 	}
 
 	return nil
+}
+
+func (r *BandwidthReconciler) allSiblingsOnCurrentNode(ctx context.Context, pod *corev1.Pod, nodeName string) (siblingSlice []corev1.Pod, nodes []string, answer bool) {
+	ownerRef := GetWorkloadRefFromPod(pod)
+
+	// If pod has no owner (standalone pod), return only itself
+	if strings.EqualFold(ownerRef.Kind, "Pod") || strings.EqualFold(ownerRef.Kind, "") {
+		nodes = append(nodes, pod.Spec.NodeName)
+		return
+	}
+	nodesMap := make(map[string]string)
+
+	var podList corev1.PodList
+	// List all pods in the same namespace
+	if err := r.List(ctx, &podList, client.InNamespace(pod.Namespace)); err != nil {
+		return
+	}
+
+	// Filter pods that have the same owner
+	var siblingPods, localPods int
+	for _, p := range podList.Items {
+		// Check if this pod has the same owner
+		pOwnerRef := GetWorkloadRefFromPod(&p)
+		// creat list of nodes where siblings are running
+		if strings.EqualFold(pOwnerRef.UID, ownerRef.UID) && !strings.EqualFold(p.Spec.NodeName, nodeName) {
+			// sibling pod on another node
+			// need to inform the node, so that it recomputes its bandwidth usage
+			// by changing the corresponding BW specs and triggering a reconcile
+			nodesMap[p.Spec.NodeName] = p.Spec.NodeName
+		}
+		// Skip pods that are being deleted
+		if p.DeletionTimestamp != nil {
+			continue
+		}
+
+		if strings.EqualFold(pOwnerRef.UID, ownerRef.UID) && strings.EqualFold(pOwnerRef.Kind, ownerRef.Kind) {
+			if strings.EqualFold(p.Spec.NodeName, nodeName) {
+				localPods++
+			}
+			siblingPods++
+			siblingSlice = append(siblingSlice, p)
+		}
+	}
+	if siblingPods > 0 && siblingPods == localPods {
+		answer = true
+	}
+
+	return
 }

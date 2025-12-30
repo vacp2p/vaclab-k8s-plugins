@@ -25,22 +25,22 @@ spec:
       name: DL
       type: integer
     - jsonPath: .status.used.network.ulMbps
-      name: UsedUL
+      name: uUL
       type: integer
     - jsonPath: .status.used.network.dlMbps
-      name: UsedDL
+      name: uDL
       type: integer
-    - jsonPath: .status.capacity.local.ulMbps
-      name: LoUL
+    - jsonPath: .spec.capacity.local.ulMbps
+      name: LUL
       type: integer
-    - jsonPath: .status.capacity.local.dlMbps
-      name: LoDL
+    - jsonPath: .spec.capacity.local.dlMbps
+      name: LDL
       type: integer
     - jsonPath: .status.used.local.ulMbps
-      name: UsedLoUL
+      name: uLUL
       type: integer
     - jsonPath: .status.used.local.dlMbps
-      name: UsedLoDL
+      name: uLDL
       type: integer
     - jsonPath: .status.status
       name: State
@@ -302,6 +302,7 @@ spec:
                   type: object
                 type: array
               status:
+                default: None
                 enum:
                 - Created
                 - Creating

@@ -35,8 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/api/v1"
-	"github.com/vacp2p/vaclab-k8s-plugins/internal/controller"
+	networkingv1 "github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/api/v1"
+	"github.com/vacp2p/vaclab-k8s-plugins/bandwidth-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -62,9 +62,28 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+
+	// Bandwidth configuration flags
+	var defaultLocalUL int64
+	var defaultLocalDL int64
+	var defaultNetworkUL int64
+	var defaultNetworkDL int64
+	var egressBandwidthAnnotation string
+	var ingressBandwidthAnnotation string
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+
+	// Bandwidth defaults
+	flag.Int64Var(&defaultLocalUL, "default-local-ul-mbps", 20000, "Default local uplink bandwidth in Mbps (OVS/bridge)")
+	flag.Int64Var(&defaultLocalDL, "default-local-dl-mbps", 20000, "Default local downlink bandwidth in Mbps (OVS/bridge)")
+	flag.Int64Var(&defaultNetworkUL, "default-network-ul-mbps", 1000, "Default network uplink bandwidth in Mbps (physical NIC)")
+	flag.Int64Var(&defaultNetworkDL, "default-network-dl-mbps", 1000, "Default network downlink bandwidth in Mbps (physical NIC)")
+
+	// Bandwidth annotations (CNI-specific)
+	flag.StringVar(&egressBandwidthAnnotation, "egress-bandwidth-annotation", "ovn.kubernetes.io/egress_rate", "Pod annotation key for egress bandwidth")
+	flag.StringVar(&ingressBandwidthAnnotation, "ingress-bandwidth-annotation", "ovn.kubernetes.io/ingress_rate", "Pod annotation key for ingress bandwidth")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -179,8 +198,17 @@ func main() {
 	}
 
 	if err := (&controller.BandwidthReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("bandwidth-controller"),
+		Config: controller.BandwidthConfig{
+			DefaultLocalUL:             defaultLocalUL,
+			DefaultLocalDL:             defaultLocalDL,
+			DefaultNetworkUL:           defaultNetworkUL,
+			DefaultNetworkDL:           defaultNetworkDL,
+			EgressBandwidthAnnotation:  egressBandwidthAnnotation,
+			IngressBandwidthAnnotation: ingressBandwidthAnnotation,
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Bandwidth")
 		os.Exit(1)

@@ -1,0 +1,29 @@
+# Example values for KubeOVN CNI
+# Use with: helm install vaclab-bandwidth-operator ./dist/chart -f examples/kubeo vn-values.yaml
+
+manager:
+  image:
+    repository: katakuri100/vaclab-bandwidth-operator
+    tag: latest
+  
+  bandwidth:
+    local:
+      uplink: 20000
+      downlink: 20000
+    network:
+      uplink: 1000
+      downlink: 1000
+  
+  annotations:
+    egress: "ovn.kubernetes.io/egress_rate"
+    ingress: "ovn.kubernetes.io/ingress_rate"
+  
+  leaderElection:
+    enabled: false
+
+crd:
+  enable: true
+  keep: true
+
+metrics:
+  enable: true
