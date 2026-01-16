@@ -4,7 +4,7 @@
 
 scheduler:
   name: vaclab-scheduler
-  image: katakuri100/vaclab-scheduler:v0.30.6
+  image: katakuri100/vaclab-scheduler:v0.30.6-1
   command:
   - /bin/kube-scheduler
   replicaCount: 1
@@ -23,7 +23,7 @@ scheduler:
 
 controller:
   name: vaclab-scheduler-controller
-  image: katakuri100/vaclab-scheduler-controller:v0.30.6
+  image: katakuri100/vaclab-scheduler-controller:v0.30.6-1
   replicaCount: 1
   leaderElect: false
   priorityClassName: ""
@@ -44,6 +44,9 @@ controller:
 plugins:
   enabled: ["VaclabScheduling"]
   disabled: [] # only in-tree plugins need to be defined here
+  # Score weight for VaclabScheduling plugin (higher = more influence)
+  # Default 100 makes bandwidth the dominant factor in scheduling decisions
+  scoreWeight: 100
 
 # Customize the enabled plugins' config.
 # Refer to the "pluginConfig" section of manifests/<plugin>/scheduler-config.yaml.

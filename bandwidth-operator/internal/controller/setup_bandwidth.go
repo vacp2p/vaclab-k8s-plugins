@@ -155,6 +155,31 @@ func (r *BandwidthReconciler) SetupBandwidthResource(ctx context.Context, bandwi
 					})
 				}
 
+			} else {
+				// pod not created yet, in pendning state, freshly reserved by the scheduler
+				// during reserve stage, should have requested bandwidth defined in the request and pod uid
+				// should be taken into account for capacity calculation because scheduler will remove it in case of scheduling failure
+				if !strings.EqualFold(req.PodUid, "") && (req.Bandwidth.UlMbps > 0 || req.Bandwidth.DlMbps > 0) {
+					usedUlNetwork += req.Bandwidth.UlMbps
+					usedDlNetwork += req.Bandwidth.DlMbps
+					usedUlLocal += req.Bandwidth.UlMbps
+					usedDlLocal += req.Bandwidth.DlMbps
+					reservationInfo = append(reservationInfo, networkingv1.ReservationInfo{
+						PodName: req.PodName,
+						PodUid:  req.PodUid,
+						Bandwidth: networkingv1.Capacity{
+							Network: networkingv1.BandwidthDefinition{
+								UlMbps: req.Bandwidth.UlMbps,
+								DlMbps: req.Bandwidth.DlMbps,
+							},
+							Local: networkingv1.BandwidthDefinition{
+								UlMbps: req.Bandwidth.UlMbps,
+								DlMbps: req.Bandwidth.DlMbps,
+							},
+						},
+						Namespace: req.Namespace,
+					})
+				}
 			}
 		}
 		usedCapacity.Local = networkingv1.BandwidthDefinition{
@@ -190,91 +215,6 @@ func (r *BandwidthReconciler) SetupBandwidthResource(ctx context.Context, bandwi
 	// Requeue to check the status later
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
-
-// used only when manually changing the spec of an existing Bandwidth resource
-// only max capacity changes are allowed manually
-func (r *BandwidthReconciler) CheckAndUpdateBandwidth(ctx context.Context, bandwidth *networkingv1.Bandwidth) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("watching vaclab Bandwidth resource for updates")
-
-	nodeName := bandwidth.Spec.Node
-	bwName := bandwidth.Name
-	//make sure node exists and bw resource is valid
-	var node corev1.Node
-	nodeErr := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node)
-	if nodeErr != nil {
-		if apierrors.IsNotFound(nodeErr) {
-			// Node gone: need to stop and clean up any existing bandwidth resource
-			log.Info("Node not found, cleaning up Bandwidth resource", "node", nodeName)
-			var bw networkingv1.Bandwidth
-			if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &bw); err == nil {
-				_ = r.Delete(ctx, &bw) // ignore error
-			}
-			bandwidth.Status.Status = networkingv1.Error
-			bandwidth.Status.ErrorReason = "node not found"
-			r.generateEvent(networkingv1.EventVaclabNodeBandwidthFailed, bandwidth)
-			return ctrl.Result{}, nil
-		}
-		bandwidth.Status.Status = networkingv1.Error
-		bandwidth.Status.ErrorReason = "unable to fetch node information"
-		log.Info("Node not found, cleaning up Bandwidth resource", "node", nodeName)
-		var bw networkingv1.Bandwidth
-		if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &bw); err == nil {
-			_ = r.Delete(ctx, &bw) // ignore error
-		}
-		r.generateEvent(networkingv1.EventVaclabNodeBandwidthFailed, bandwidth)
-		return ctrl.Result{}, nodeErr
-	}
-	if !strings.EqualFold(bwName, node.Name) {
-		log.Error(nil, "Node name mismatch", "expected", nodeName, "found", node.Name)
-		bandwidth.Status.Status = networkingv1.Error
-		bandwidth.Status.ErrorReason = "name mismatch between nodeName and bandwidthName"
-		log.Info("Node not found, cleaning up Bandwidth resource", "node", nodeName)
-		var bw networkingv1.Bandwidth
-		if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &bw); err == nil {
-			_ = r.Delete(ctx, &bw) // ignore error
-		}
-		r.generateEvent(networkingv1.EventVaclabNodeBandwidthFailed, bandwidth)
-		return ctrl.Result{}, nil
-	}
-
-	//currentSpec := bandwidth.Spec.Requests
-	state := bandwidth.Status
-	if len(state.Reservations) != len(bandwidth.Spec.Requests) {
-		// changes in requests are not allowed
-		log.Error(nil, "Changes in bandwidth requests are not allowed after creation", "node", nodeName)
-		return ctrl.Result{}, nil
-	}
-
-	//expectedCapacity := bandwidth.Status.Capacity
-	if state.Capacity != bandwidth.Spec.Capacity {
-		state.Capacity = bandwidth.Spec.Capacity
-		state.Remaining = networkingv1.Capacity{
-			Local: networkingv1.BandwidthDefinition{
-				UlMbps: bandwidth.Spec.Capacity.Local.UlMbps - state.Used.Local.UlMbps,
-				DlMbps: bandwidth.Spec.Capacity.Local.DlMbps - state.Used.Local.DlMbps,
-			},
-			Network: networkingv1.BandwidthDefinition{
-				UlMbps: bandwidth.Spec.Capacity.Network.UlMbps - state.Used.Network.UlMbps,
-				DlMbps: bandwidth.Spec.Capacity.Network.DlMbps - state.Used.Network.DlMbps,
-			},
-		}
-	}
-	bandwidth.Status = state
-	bandwidth.Status.UpdatedAt = metav1.NewTime(time.Now())
-
-	if err := r.UpdateBandwidthStatus(ctx, bandwidth); err != nil {
-		log.Error(err, "unable to update bandwidth resource status", "node", nodeName)
-		return ctrl.Result{}, err
-	}
-	r.Update(ctx, bandwidth)
-	// Requeue to check the status later
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-/*func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *networkingv1.Bandwidth) (ctrl.Result, error) {
-	return r.syncFromSpecAndPodsWithVisited(ctx, bw, make(map[string]bool))
-}*/
 
 // syncSingleNodeBandwidth updates a single bandwidth resource without cascading to related nodes
 // Used for background updates triggered by sibling pod changes
@@ -335,12 +275,34 @@ func (r *BandwidthReconciler) syncSingleNodeBandwidth(ctx context.Context, bw *n
 
 	for _, req := range bwRequests {
 		pod, exists := podsWithBw[req.PodUid]
+		foundUnknown := false
 		if !exists {
-			log.V(1).Info("dropping request for missing pod", "podUid", req.PodUid, "podName", req.PodName)
-			continue
-		}
+			// Try to get pod status using client and pod UID
+			// keep the request if pod is pending (scheduled but not created yet)
+			var unknownPod corev1.Pod
+			if err := r.Get(ctx, types.NamespacedName{Name: req.PodName, Namespace: req.Namespace}, &unknownPod); err != nil || string(unknownPod.UID) != req.PodUid {
+				log.V(1).Info("dropping request for missing pod", "podUid", req.PodUid, "podName", req.PodName)
+				continue
+			}
 
-		ul, dl := r.GetBandwidthFromAnnotation(pod)
+			if unknownPod.DeletionTimestamp != nil || unknownPod.Status.Phase == corev1.PodSucceeded || unknownPod.Status.Phase == corev1.PodFailed {
+				log.V(1).Info("dropping request for terminating/completed pod", "podUid", req.PodUid, "podName", req.PodName)
+				continue
+			}
+
+			if unknownPod.Status.Phase != corev1.PodPending {
+				log.V(1).Info("dropping request for pod without bandwidth annotation", "podUid", req.PodUid, "podName", req.PodName)
+				continue
+			}
+			foundUnknown = true
+			pod = unknownPod
+		}
+		var ul, dl int64
+		if foundUnknown {
+			ul, dl = req.Bandwidth.UlMbps, req.Bandwidth.DlMbps
+		} else {
+			ul, dl = r.GetBandwidthFromAnnotation(pod)
+		}
 		usedUlLocal += ul
 		usedDlLocal += dl
 
@@ -519,28 +481,44 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 
 	for _, req := range bwRequests {
 		pod, exists := podsWithBw[req.PodUid]
+		isPendingPod := false
 		if !exists {
-			// Pod gone or no bw annotation anymore => drop request
-			// Check if this pod had siblings on other nodes - they need updates
-			if oldReq, hadRequest := existingReqs[req.PodUid]; hadRequest {
-				log.Info("dropping request for missing pod", "podUid", req.PodUid, "podName", req.PodName)
-				// If pod was part of a workload with siblings, mark related nodes as affected
-				// We need to fetch sibling info to know which nodes to notify
-				// Use a best-effort approach: get pod from old request data if possible
-				var oldPod corev1.Pod
-				if err := r.Get(ctx, types.NamespacedName{Name: oldReq.PodName, Namespace: oldReq.Namespace}, &oldPod); err == nil {
-					_, nodes, _ := r.allSiblingsOnCurrentNode(ctx, &oldPod, nodeName)
-					for _, n := range nodes {
-						if !strings.EqualFold(n, nodeName) {
-							affectedRelatedNodes[n] = true
+			var pendingPod corev1.Pod
+			if err := r.Get(ctx, types.NamespacedName{Name: req.PodName, Namespace: req.Namespace}, &pendingPod); err == nil && string(pendingPod.UID) == req.PodUid {
+				if pendingPod.Status.Phase == corev1.PodPending {
+					// Pod is pending - keep the request as is
+					isPendingPod = true
+					pod = pendingPod
+				}
+			}
+			if !isPendingPod {
+				// Pod gone or no bw annotation anymore => drop request
+				// Check if this pod had siblings on other nodes - they need updates
+				if oldReq, hadRequest := existingReqs[req.PodUid]; hadRequest {
+					log.Info("dropping request for missing pod", "podUid", req.PodUid, "podName", req.PodName)
+					// If pod was part of a workload with siblings, mark related nodes as affected
+					// We need to fetch sibling info to know which nodes to notify
+					// Use a best-effort approach: get pod from old request data if possible
+					var oldPod corev1.Pod
+					if err := r.Get(ctx, types.NamespacedName{Name: oldReq.PodName, Namespace: oldReq.Namespace}, &oldPod); err == nil {
+						_, nodes, _ := r.allSiblingsOnCurrentNode(ctx, &oldPod, nodeName)
+						for _, n := range nodes {
+							if !strings.EqualFold(n, nodeName) {
+								affectedRelatedNodes[n] = true
+							}
 						}
 					}
 				}
+				continue
 			}
-			continue
 		}
 
-		ul, dl := r.GetBandwidthFromAnnotation(pod)
+		var ul, dl int64
+		if isPendingPod {
+			ul, dl = req.Bandwidth.UlMbps, req.Bandwidth.DlMbps
+		} else {
+			ul, dl = r.GetBandwidthFromAnnotation(pod)
+		}
 		// local bandwidth is always used
 		// since pods are always connected to virtual bridge
 		usedUlLocal += ul
