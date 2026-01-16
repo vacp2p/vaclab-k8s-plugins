@@ -295,7 +295,8 @@ func (v *VaclabScheduling) NormalizeScore(ctx context.Context, state *framework.
 	return framework.NewStatus(framework.Success, "")
 }
 
-// Reserve logs the intent to reserve bandwidth (actual reservation happens in PostBind)
+// Reserve updates the bandwidth CRD to reserve bandwidth for the pod
+// This happens before binding to avoid race conditions
 func (v *VaclabScheduling) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
 	// Get cached bandwidth requirements from PreFilter
 	s, err := getPreFilterState(state)
@@ -309,44 +310,63 @@ func (v *VaclabScheduling) Reserve(ctx context.Context, state *framework.CycleSt
 		return framework.NewStatus(framework.Success, "")
 	}
 
-	// Just log the intent - actual CRD update happens in PostBind after pod exists
-	klog.V(3).InfoS("Reserved bandwidth intent for pod", "node", nodeName, "pod", pod.Name, "ul", s.ulMbps, "dl", s.dlMbps)
+	// Update CRD to reserve bandwidth (before binding)
+	if err := v.bandwidth.AddBandwidthRequest(ctx, nodeName, pod.Name, pod.Namespace, string(pod.UID), s.ulMbps, s.dlMbps); err != nil {
+		klog.ErrorS(err, "Failed to reserve bandwidth in CRD", "node", nodeName, "pod", pod.Name)
+		return framework.NewStatus(framework.Error, fmt.Sprintf("failed to reserve bandwidth: %v", err))
+	}
+
+	klog.InfoS("Reserved bandwidth in CRD", "node", nodeName, "pod", pod.Name, "ul", s.ulMbps, "dl", s.dlMbps)
 	return framework.NewStatus(framework.Success, "")
 }
 
-// Unreserve is a no-op since we don't modify CRD in Reserve phase
+// Unreserve releases the bandwidth reservation if binding fails
+// This ensures we clean up CRD modifications made in Reserve
 func (v *VaclabScheduling) Unreserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) {
-	// No-op: we don't add to CRD in Reserve, so nothing to remove
-	klog.V(4).InfoS("Unreserve called (no-op)", "node", nodeName, "pod", pod.Name)
-}
-
-// PreBind is called before binding the pod (final validation)
-func (v *VaclabScheduling) PreBind(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
-	// Final check that bandwidth is still available
-	ulMbps, dlMbps, err := v.bandwidth.ExtractPodBandwidthRequirement(ctx, pod)
+	// Get cached bandwidth requirements from PreFilter
+	s, err := getPreFilterState(state)
 	if err != nil {
-		return framework.NewStatus(framework.Error, fmt.Sprintf("failed to extract bandwidth: %v", err))
+		klog.ErrorS(err, "Failed to get prefilter state in Unreserve", "pod", pod.Name)
+		return
 	}
 
-	if ulMbps == 0 && dlMbps == 0 {
+	// Skip if no bandwidth was reserved
+	if s.ulMbps == 0 && s.dlMbps == 0 {
+		return
+	}
+
+	// Remove bandwidth request from CRD (cleanup after failed binding)
+	if err := v.bandwidth.RemoveBandwidthRequest(ctx, nodeName, string(pod.UID)); err != nil {
+		klog.ErrorS(err, "Failed to unreserve bandwidth in CRD", "node", nodeName, "pod", pod.Name)
+		return
+	}
+
+	klog.InfoS("Unreserved bandwidth in CRD", "node", nodeName, "pod", pod.Name, "ul", s.ulMbps, "dl", s.dlMbps)
+}
+
+// PreBind is called before binding the pod
+// Bandwidth was already reserved in Reserve phase, so this just logs
+func (v *VaclabScheduling) PreBind(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
+	// Get cached bandwidth requirements from PreFilter
+	s, err := getPreFilterState(state)
+	if err != nil {
+		klog.ErrorS(err, "Failed to get prefilter state in PreBind", "pod", pod.Name)
+		// Don't fail binding for state read errors
 		return framework.NewStatus(framework.Success, "")
 	}
 
-	// Final check that bandwidth is still available
-	sufficient, err := v.bandwidth.HasSufficientBandwidth(ctx, nodeName, ulMbps, dlMbps)
-	if err != nil {
-		return framework.NewStatus(framework.Error, fmt.Sprintf("failed to verify bandwidth: %v", err))
+	// Skip if no bandwidth required
+	if s.ulMbps == 0 && s.dlMbps == 0 {
+		return framework.NewStatus(framework.Success, "")
 	}
 
-	if !sufficient {
-		return framework.NewStatus(framework.Unschedulable, "insufficient bandwidth at prebind")
-	}
-
-	klog.V(3).InfoS("PreBind bandwidth check passed", "node", nodeName, "pod", pod.Name)
+	// Bandwidth was already validated and reserved in Reserve phase
+	klog.V(3).InfoS("PreBind: bandwidth already reserved", "node", nodeName, "pod", pod.Name, "ul", s.ulMbps, "dl", s.dlMbps)
 	return framework.NewStatus(framework.Success, "")
 }
 
-// PostBind adds the bandwidth request to CRD after pod is successfully bound
+// PostBind is called after pod is successfully bound
+// Bandwidth was already reserved in Reserve phase, so this just logs success
 func (v *VaclabScheduling) PostBind(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) {
 	// Get cached bandwidth requirements from PreFilter
 	s, err := getPreFilterState(state)
@@ -360,11 +380,6 @@ func (v *VaclabScheduling) PostBind(ctx context.Context, state *framework.CycleS
 		return
 	}
 
-	// Now add bandwidth request to the node's Bandwidth CRD (pod exists now)
-	if err := v.bandwidth.AddBandwidthRequest(ctx, nodeName, pod.Name, pod.Namespace, string(pod.UID), s.ulMbps, s.dlMbps); err != nil {
-		klog.ErrorS(err, "Failed to add bandwidth request in PostBind", "node", nodeName, "pod", pod.Name)
-		return
-	}
-
-	klog.InfoS("Added bandwidth request to CRD in PostBind", "node", nodeName, "pod", pod.Name, "ul", s.ulMbps, "dl", s.dlMbps)
+	// Bandwidth was already reserved in Reserve phase, just log success
+	klog.InfoS("Pod successfully bound with bandwidth reservation", "node", nodeName, "pod", pod.Name, "ul", s.ulMbps, "dl", s.dlMbps)
 }
