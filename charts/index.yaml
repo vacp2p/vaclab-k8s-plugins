@@ -1,0 +1,49 @@
+apiVersion: v1
+entries:
+  vaclab-bandwidth-operator:
+  - apiVersion: v2
+    appVersion: 0.1.9
+    created: "2026-01-16T22:24:32.090233163Z"
+    description: Vaclab Kubernetes operator for bandwidth-aware workload scheduling
+      in Vaclab environments
+    digest: bf5be250bc03b156488e86412e1a698e877ce502282db6d16bd0b6d257159484
+    icon: https://raw.githubusercontent.com/vacp2p/vaclab-2/feat/add_lab_components/extras/vac-logo-light-no-bg.png
+    keywords:
+    - kubernetes
+    - operator
+    - bandwidth
+    - networking
+    - scheduling
+    - vac
+    - DST
+    - IFT
+    - vaclab
+    maintainers:
+    - email: mamoutou@vac.dev
+      name: VAC DST Team
+    name: vaclab-bandwidth-operator
+    type: application
+    urls:
+    - https://vacp2p.github.io/vaclab-k8s-plugins/charts/vaclab-bandwidth-operator-0.1.9.tgz
+    version: 0.1.9
+  vaclab-scheduler:
+  - apiVersion: v2
+    appVersion: 0.30.7
+    created: "2026-01-16T22:24:32.091321966Z"
+    description: deploy vaclab bandwidth-aware scheduler plugin as a second scheduler
+      in cluster
+    digest: 12b7dc35ae94178dc57dc483c6510e04681725bc9c7faae2240d02175d952683
+    keywords:
+    - scheduler-plugins
+    - vaclab
+    - scheduler
+    - kubernetes
+    maintainers:
+    - email: mamoutou@vac.dev
+      name: mamoutou
+    name: vaclab-scheduler
+    type: application
+    urls:
+    - https://vacp2p.github.io/vaclab-k8s-plugins/charts/vaclab-scheduler-0.30.7.tgz
+    version: 0.30.7
+generated: "2026-01-16T22:24:32.088592058Z"
