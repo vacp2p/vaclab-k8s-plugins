@@ -2,9 +2,9 @@ apiVersion: v2
 name: vaclab-bandwidth-operator
 description: Vaclab Kubernetes operator for bandwidth-aware workload scheduling in Vaclab environments
 type: application
-version: 0.1.8
-appVersion: "0.1.8"
-icon: "https://example.com/icon.png"
+version: 0.1.9
+appVersion: "0.1.9"
+icon: "https://raw.githubusercontent.com/vacp2p/vaclab-2/feat/add_lab_components/extras/vac-logo-light-no-bg.png"
 keywords:
   - kubernetes
   - operator
