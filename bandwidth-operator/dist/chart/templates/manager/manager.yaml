@@ -41,7 +41,7 @@ spec:
                     {{- end }}
                   command:
                     - /manager
-                  image: katakuri100/vaclab-bandwidth-operator:v0.2.0
+                  image: katakuri100/vaclab-bandwidth-operator:v0.2.1
                   imagePullPolicy: IfNotPresent
                   livenessProbe:
                     httpGet:

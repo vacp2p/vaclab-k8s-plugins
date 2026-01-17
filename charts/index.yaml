@@ -2,8 +2,33 @@ apiVersion: v1
 entries:
   vaclab-bandwidth-operator:
   - apiVersion: v2
+    appVersion: 0.2.1
+    created: "2026-01-17T13:31:32.611407179Z"
+    description: Vaclab Kubernetes operator for bandwidth-aware workload scheduling
+      in Vaclab environments
+    digest: 8f9473c32763045645dda2737d268bf26874e9cf1755810cfb4c7d847f0e49d3
+    icon: https://raw.githubusercontent.com/vacp2p/vaclab-2/feat/add_lab_components/extras/vac-logo-light-no-bg.png
+    keywords:
+    - kubernetes
+    - operator
+    - bandwidth
+    - networking
+    - scheduling
+    - vac
+    - DST
+    - IFT
+    - vaclab
+    maintainers:
+    - email: mamoutou@vac.dev
+      name: VAC DST Team
+    name: vaclab-bandwidth-operator
+    type: application
+    urls:
+    - https://vacp2p.github.io/vaclab-k8s-plugins/charts/vaclab-bandwidth-operator-0.2.1.tgz
+    version: 0.2.1
+  - apiVersion: v2
     appVersion: 0.2.0
-    created: "2026-01-17T13:16:34.587948649Z"
+    created: "2026-01-17T13:31:32.610435104Z"
     description: Vaclab Kubernetes operator for bandwidth-aware workload scheduling
       in Vaclab environments
     digest: 80b1b956d1a30c643ad1ed7eefd194c72ac2c69f4cc771a829e8d7dc0fda335e
@@ -28,7 +53,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 0.1.9
-    created: "2026-01-17T13:16:34.584902823Z"
+    created: "2026-01-17T13:31:32.609233024Z"
     description: Vaclab Kubernetes operator for bandwidth-aware workload scheduling
       in Vaclab environments
     digest: bf5be250bc03b156488e86412e1a698e877ce502282db6d16bd0b6d257159484
@@ -54,7 +79,7 @@ entries:
   vaclab-scheduler:
   - apiVersion: v2
     appVersion: 0.30.7
-    created: "2026-01-17T13:16:34.590539782Z"
+    created: "2026-01-17T13:31:32.612387709Z"
     description: deploy vaclab bandwidth-aware scheduler plugin as a second scheduler
       in cluster
     digest: 12b7dc35ae94178dc57dc483c6510e04681725bc9c7faae2240d02175d952683
@@ -71,4 +96,4 @@ entries:
     urls:
     - https://vacp2p.github.io/vaclab-k8s-plugins/charts/vaclab-scheduler-0.30.7.tgz
     version: 0.30.7
-generated: "2026-01-17T13:16:34.582746523Z"
+generated: "2026-01-17T13:31:32.607222621Z"
