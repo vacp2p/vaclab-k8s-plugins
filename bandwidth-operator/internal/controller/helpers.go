@@ -61,10 +61,7 @@ func (r *BandwidthReconciler) setDefaultBandwidthValues(bandwidth *networkingv1.
 func (r *BandwidthReconciler) UpdateBandwidthStatus(ctx context.Context, bandwidth *networkingv1.Bandwidth) error {
 	// UpdatedAt is set by caller only when status actually changes
 	err := r.Status().Update(ctx, bandwidth)
-	// If conflict, return without error to allow retry
-	if errors.IsConflict(err) {
-		return nil
-	}
+	// Return conflict errors so controller can requeue
 	return err
 }
 
@@ -173,22 +170,36 @@ func (r *BandwidthReconciler) createBandwidthResourcesForAllNodes(ctx context.Co
 			return err
 		}
 
-		// Now update the status after creation
+		// Now update the status after creation with retry on conflict
 		// Re-get the object to get the latest version
-		if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &bw); err != nil {
-			return err
+		maxRetries := 3
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &bw); err != nil {
+				if attempt == maxRetries-1 {
+					// Give up on Get failures, let reconcile loop handle it
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			bw.Status.Status = networkingv1.Created
+			bw.Status.Capacity = bw.Spec.Capacity
+			bw.Status.UpdatedAt = metav1.NewTime(time.Now())
+
+			if err := r.Status().Update(ctx, &bw); err != nil {
+				if errors.IsConflict(err) && attempt < maxRetries-1 {
+					// Retry on conflict
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				// On last attempt or non-conflict error, let reconcile loop handle it
+				break
+			}
+			// Success
+			r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
+			break
 		}
-
-		bw.Status.Status = networkingv1.Created
-		bw.Status.Capacity = bw.Spec.Capacity
-		bw.Status.UpdatedAt = metav1.NewTime(time.Now())
-
-		if err := r.UpdateBandwidthStatus(ctx, &bw); err != nil {
-			return err
-		}
-
-		// Generate event
-		r.generateEvent(networkingv1.EventVaclabNodeBandwidthCreated, &bw)
 	}
 
 	return nil

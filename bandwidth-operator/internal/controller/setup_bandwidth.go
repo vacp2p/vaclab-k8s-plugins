@@ -685,6 +685,18 @@ func (r *BandwidthReconciler) SyncFromSpecAndPods(ctx context.Context, bw *netwo
 			return ctrl.Result{}, err
 		}
 		log.Info("bandwidth spec updated", "node", nodeName, "requests", len(cleanRequests))
+
+		// Re-fetch to get updated resourceVersion after spec update
+		if err := r.Get(ctx, client.ObjectKeyFromObject(bw), bw); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Re-apply status fields since we just fetched fresh object
+		bw.Status.Used = usedCapacity
+		bw.Status.Remaining = remainingCapacity
+		bw.Status.Reservations = reservationInfo
+		bw.Status.Capacity = bw.Spec.Capacity
+		bw.Status.Status = networkingv1.Created
+		bw.Status.ErrorReason = ""
 	}
 
 	// Only update status if it actually changed
