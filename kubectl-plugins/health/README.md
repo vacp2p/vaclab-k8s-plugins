@@ -58,13 +58,3 @@ node-03.cluster.local host  TCP       UL         9.42 Gbps    0.12ms  -       - 
 | `--mode` | `-m` | Filter: `host` or `pod` |
 | `--node` | `-n` | Filter by dest node name |
 | `--limit` | `--max` | Max results to show |
-
-## Cleanup
-
-```bash
-kubectl delete namespace health-monitoring
-```
-
-## License
-
-See the [LICENSE](../../LICENSE) file for details.
