@@ -103,6 +103,9 @@ func ListBenchmarksWithFilter(ctx context.Context, filter ListFilter) error {
 			if filter.Mode == "pod" && r.BenchmarkMode != "pod_network" {
 				continue
 			}
+			if filter.Mode == "intra" && r.BenchmarkMode != "intra_node" {
+				continue
+			}
 		}
 
 		// Node filter (destination node)
@@ -158,7 +161,7 @@ func ListBenchmarksWithFilter(ctx context.Context, filter ListFilter) error {
 	}
 
 	// Print header
-	fmt.Fprintln(tw, "DEST\tMODE\tPROTOCOL\tDIRECTION\tTHROUGHPUT\tRTT\tJITTER\tLOSS\tRETRANS\tAGE")
+	fmt.Fprintln(tw, "DEST\tMODE\tPROTOCOL\tDIR\tTHROUGHPUT\tRTT\tJITTER\tLOSS\tRETRANS\tAGE")
 
 	for _, r := range filtered {
 		age := humanDuration(time.Since(r.Timestamp))
@@ -167,6 +170,8 @@ func ListBenchmarksWithFilter(ctx context.Context, filter ListFilter) error {
 		modeStr := "host"
 		if r.BenchmarkMode == "pod_network" {
 			modeStr = "pod"
+		} else if r.BenchmarkMode == "intra_node" {
+			modeStr = "intra"
 		}
 
 		rttStr := "-"
@@ -188,7 +193,6 @@ func ListBenchmarksWithFilter(ctx context.Context, filter ListFilter) error {
 
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			r.DestNode,
-			//r.SourceNode,
 			modeStr,
 			strings.ToUpper(r.Protocol),
 			r.Direction,

@@ -4,6 +4,26 @@ A Small kubectl plugin for iperf-based network benchmarking in the vaclab cluste
 
 ## Installation
 
+### Install via Krew (Recommended)
+
+First, add the private plugin index:
+
+```bash
+kubectl krew index add vacp2p https://github.com/vacp2p/vaclab-k8s-plugins.git
+```
+
+Then install the plugin:
+
+```bash
+kubectl krew install vacp2p/health
+```
+
+To update the plugin:
+
+```bash
+kubectl krew upgrade health
+```
+
 ### Copy the binary from current repo
 
 ```bash
@@ -53,8 +73,26 @@ node-03.cluster.local host  TCP       UL         9.42 Gbps    0.12ms  -       - 
 |------|-------|-------------|
 | `--conn` | `-c` | Parallel iperf connections (default: 4) |
 | `--duration` | `-d` | Test duration in seconds (default: 10) |
+| `--exclude` | `-e` | Comma-separated nodes to exclude from benchmarks |
 | `--latest` | `-L` | Latest result per dest node |
 | `--today` | `-t` | Today's results only |
 | `--mode` | `-m` | Filter: `host` or `pod` |
 | `--node` | `-n` | Filter by dest node name |
 | `--limit` | `--max` | Max results to show |
+
+## Releasing
+
+To release a new version manually:
+
+1. Build binaries for all platforms:
+   ```bash
+   cd kubectl-plugins/health
+   goreleaser release --clean
+   ```
+
+2. Create a GitHub release and upload the binaries from `dist/`
+
+3. Update `plugins/health.yaml` with the new version and SHA256 checksums:
+   ```bash
+   sha256sum dist/kubectl-health_*.tar.gz dist/kubectl-health_*.zip
+   ```

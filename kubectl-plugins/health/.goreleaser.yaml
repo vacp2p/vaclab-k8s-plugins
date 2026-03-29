@@ -1,0 +1,58 @@
+version: 2
+project_name: kubectl-health
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: kubectl-health
+    main: ./main.go
+    binary: kubectl-health
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: kubectl-health
+    builds:
+      - kubectl-health
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: vacp2p
+    name: vaclab-k8s-plugins
+  draft: false
+  prerelease: auto
+  name_template: "kubectl-health {{ .Tag }}"

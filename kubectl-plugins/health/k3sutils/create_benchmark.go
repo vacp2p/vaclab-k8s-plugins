@@ -359,7 +359,24 @@ set -e
 # Defaults if ENV variables are not provided
 PARALLEL=${IPERF_PARALLEL:-5}
 DURATION=${IPERF_DURATION:-10}
+INTRA_NODE=${INTRA_NODE_MODE:-false}
+EXCLUDE_NODES=${EXCLUDE_NODES:-""}
 DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Function to check if a node is in the exclude list
+is_excluded() {
+  local node=$1
+  if [ -z "$EXCLUDE_NODES" ]; then
+    return 1
+  fi
+  IFS=',' read -ra EXCLUDED <<< "$EXCLUDE_NODES"
+  for excluded in "${EXCLUDED[@]}"; do
+    if [ "$node" == "$excluded" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 # Initialize results array
 RESULTS="[]"
@@ -367,7 +384,8 @@ RESULTS="[]"
 echo "--- STARTING BENCHMARK RUN: $DATE ---" >&2
 echo "Target Service: $TARGET_SVC" >&2
 echo "My Node: $MY_NODE_NAME" >&2
-echo "Config: Parallel=$PARALLEL, Duration=${DURATION}s" >&2
+echo "Config: Parallel=$PARALLEL, Duration=${DURATION}s, IntraNode=$INTRA_NODE" >&2
+[ -n "$EXCLUDE_NODES" ] && echo "Excluded nodes: $EXCLUDE_NODES" >&2
 
 run_benchmark() {
   local svc_label=$1; local port=$2; local mode=$3
@@ -385,9 +403,24 @@ run_benchmark() {
     DEST_IP=$(echo $target | jq -r .ip)
     DEST_NODE=$(echo $target | jq -r .node)
 
-    if [ "$DEST_NODE" == "$MY_NODE_NAME" ]; then 
-      echo "Skipping self ($MY_NODE_NAME)" >&2
+    # Check if destination node is in exclude list
+    if is_excluded "$DEST_NODE"; then
+      echo "Skipping excluded node ($DEST_NODE)" >&2
       continue
+    fi
+
+    # Intra-node mode: only test against the server on the SAME node
+    if [ "$INTRA_NODE" == "true" ]; then
+      if [ "$DEST_NODE" != "$MY_NODE_NAME" ]; then
+        echo "Skipping remote node ($DEST_NODE) - intra-node mode" >&2
+        continue
+      fi
+    else
+      # Inter-node mode: skip self (same node)
+      if [ "$DEST_NODE" == "$MY_NODE_NAME" ]; then 
+        echo "Skipping self ($MY_NODE_NAME)" >&2
+        continue
+      fi
     fi
 
     for DIRECTION in "UL" "DL"; do
@@ -543,7 +576,13 @@ echo "--- ALL JOBS FINISHED ---" >&2
 			return err
 		}
 	} else {
-		fmt.Fprintf(tw, "[INFO] configmap '%s' already exists\n", IPERF_BENCHMARK_CONFIG_MAP)
+		// Update existing ConfigMap
+		if _, err := K3sClient.CoreV1().ConfigMaps(DEFAULT_NAMESPACE).Update(ctx, configMap, metav1.UpdateOptions{}); err != nil {
+			fmt.Fprintf(tw, "[ERROR] failed to update configmap '%s': %v\n", IPERF_BENCHMARK_CONFIG_MAP, err)
+			tw.Flush()
+			return err
+		}
+		fmt.Fprintf(tw, "[INFO] configmap '%s' updated\n", IPERF_BENCHMARK_CONFIG_MAP)
 	}
 
 	tw.Flush()
@@ -676,7 +715,6 @@ func CreateBenchmarkResultConfigMap(report *BenchmarkReport, suffix string) erro
 	return nil
 }
 
-
 func GetSourceNodeFromPod(podName string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -737,6 +775,7 @@ func CreateIperfHostNetworkBenchmarkPod(config BenchmarkConfig) error {
 						{Name: "TARGET_PORT", Value: fmt.Sprintf("%d", DEFAULT_IPERF_PORT)},
 						{Name: "IPERF_PARALLEL", Value: fmt.Sprintf("%d", config.NumberOfConnections)},
 						{Name: "IPERF_DURATION", Value: fmt.Sprintf("%d", config.DurationSeconds)},
+						{Name: "EXCLUDE_NODES", Value: config.ExcludeNodes},
 						{
 							Name: "MY_NODE_NAME",
 							ValueFrom: &corev1.EnvVarSource{
@@ -841,6 +880,7 @@ func CreateIperfPodNetworkBenchmarkPod(config BenchmarkConfig) error {
 						{Name: "TARGET_PORT", Value: fmt.Sprintf("%d", DEFAULT_IPERF_PORT)},
 						{Name: "IPERF_PARALLEL", Value: fmt.Sprintf("%d", config.NumberOfConnections)},
 						{Name: "IPERF_DURATION", Value: fmt.Sprintf("%d", config.DurationSeconds)},
+						{Name: "EXCLUDE_NODES", Value: config.ExcludeNodes},
 						{
 							Name: "MY_NODE_NAME",
 							ValueFrom: &corev1.EnvVarSource{
@@ -897,6 +937,208 @@ func CreateIperfPodNetworkBenchmarkPod(config BenchmarkConfig) error {
 	fmt.Fprintf(tw, "[INFO] pod '%s' created for pod network benchmark\n", IPERF_CLIENT_PODNETWORK_NAME)
 	tw.Flush()
 	return nil
+}
+
+// CreateIntraNodeBenchmarkPods creates individual pods on each node for intra-node benchmarks
+func CreateIntraNodeBenchmarkPods(config BenchmarkConfig) error {
+	tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	defaultMode := int32(0755)
+
+	// Get all nodes in the cluster
+	nodes, err := K3sClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %v", err)
+	}
+
+	// Build exclude nodes map
+	excludeNodesMap := make(map[string]bool)
+	if config.ExcludeNodes != "" {
+		for _, node := range strings.Split(config.ExcludeNodes, ",") {
+			excludeNodesMap[strings.TrimSpace(node)] = true
+		}
+	}
+
+	// Delete existing intra-node benchmark pods
+	if err := K3sClient.CoreV1().Pods(DEFAULT_NAMESPACE).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{
+		LabelSelector: "app=iperf-benchmark,mode=intra-node",
+	}); err != nil {
+		if !apierrors.IsNotFound(err) {
+			fmt.Fprintf(tw, "[WARN] failed to delete existing intra-node pods: %v\n", err)
+		}
+	}
+	time.Sleep(2 * time.Second)
+
+	createdCount := 0
+	for _, node := range nodes.Items {
+		nodeName := node.Name
+
+		// Skip excluded nodes
+		if excludeNodesMap[nodeName] {
+			fmt.Fprintf(tw, "[INFO] skipping excluded node '%s'\n", nodeName)
+			tw.Flush()
+			continue
+		}
+
+		// Check if node is schedulable
+		if node.Spec.Unschedulable {
+			fmt.Fprintf(tw, "[INFO] skipping unschedulable node '%s'\n", nodeName)
+			tw.Flush()
+			continue
+		}
+
+		podName := fmt.Sprintf("iperf-intra-node-%s", nodeName)
+		intraNodeLabels := map[string]string{
+			"app":  "iperf-benchmark",
+			"mode": "intra-node",
+			"node": nodeName,
+		}
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: DEFAULT_NAMESPACE,
+				Labels:    intraNodeLabels,
+			},
+			Spec: corev1.PodSpec{
+				ServiceAccountName: IPERF_BENCHMARK_SA,
+				NodeName:           nodeName,
+				Containers: []corev1.Container{
+					{
+						Name:  "iperf-client",
+						Image: IPERF_CLIENT_IMAGE,
+						Env: []corev1.EnvVar{
+							{Name: "BENCHMARK_MODE", Value: "intra_node"},
+							{Name: "INTRA_NODE_MODE", Value: "true"},
+							{Name: "TARGET_SVC", Value: "iperf-podnetwork"},
+							{Name: "TARGET_PORT", Value: fmt.Sprintf("%d", DEFAULT_IPERF_PORT)},
+							{Name: "IPERF_PARALLEL", Value: fmt.Sprintf("%d", config.NumberOfConnections)},
+							{Name: "IPERF_DURATION", Value: fmt.Sprintf("%d", config.DurationSeconds)},
+							{Name: "EXCLUDE_NODES", Value: config.ExcludeNodes},
+							{Name: "MY_NODE_NAME", Value: nodeName},
+							{Name: "VL_FULL_PATH", Value: "http://vlc-victoria-logs-cluster-vlinsert.victorialogs.svc.cluster.local:9481/insert/jsonline"},
+							{Name: "VM_FULL_PATH", Value: "http://vminsert-vmks-victoria-metrics-k8s-stack.vmetrics.svc.cluster.local:8480/insert/0/prometheus/api/v1/import/prometheus"},
+						},
+						Command: []string{"/bin/bash", "/scripts/benchmark.sh"},
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      "script-vol",
+								MountPath: "/scripts",
+							},
+						},
+					},
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: "script-vol",
+						VolumeSource: corev1.VolumeSource{
+							ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: IPERF_BENCHMARK_CONFIG_MAP,
+								},
+								DefaultMode: &defaultMode,
+							},
+						},
+					},
+				},
+				RestartPolicy: corev1.RestartPolicyNever,
+			},
+		}
+
+		if _, err := K3sClient.CoreV1().Pods(DEFAULT_NAMESPACE).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+			fmt.Fprintf(tw, "[ERROR] failed to create intra-node pod on node '%s': %v\n", nodeName, err)
+			tw.Flush()
+			continue
+		}
+		createdCount++
+		fmt.Fprintf(tw, "[INFO] created intra-node benchmark pod on node '%s'\n", nodeName)
+		tw.Flush()
+	}
+
+	if createdCount == 0 {
+		return fmt.Errorf("no intra-node benchmark pods were created")
+	}
+
+	fmt.Fprintf(tw, "[INFO] created %d intra-node benchmark pods\n", createdCount)
+	tw.Flush()
+	return nil
+}
+
+// WaitForIntraNodeBenchmarkCompletion waits for all intra-node benchmark pods to complete and collects results
+func WaitForIntraNodeBenchmarkCompletion(config BenchmarkConfig, timeout time.Duration) error {
+	tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	fmt.Fprintf(tw, "[INFO] waiting for intra-node benchmark pods to complete (timeout: %v)...\n", timeout)
+	tw.Flush()
+
+	// Wait for all intra-node benchmark pods to complete
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Fprintf(tw, "[ERROR] timeout waiting for intra-node benchmark pods\n")
+			tw.Flush()
+			return fmt.Errorf("timeout waiting for intra-node benchmark pods")
+		default:
+			pods, err := K3sClient.CoreV1().Pods(DEFAULT_NAMESPACE).List(ctx, metav1.ListOptions{
+				LabelSelector: "app=iperf-benchmark,mode=intra-node",
+			})
+			if err != nil {
+				return fmt.Errorf("failed to list intra-node benchmark pods: %v", err)
+			}
+
+			if len(pods.Items) == 0 {
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			allCompleted := true
+			completedCount := 0
+			for _, pod := range pods.Items {
+				if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+					completedCount++
+				} else {
+					allCompleted = false
+				}
+			}
+
+			if allCompleted {
+				fmt.Fprintf(tw, "[INFO] all %d intra-node benchmark pods completed\n", len(pods.Items))
+				tw.Flush()
+
+				// Collect results from all pods
+				for _, pod := range pods.Items {
+					logs, err := GetPodLogs(pod.Name)
+					if err != nil {
+						fmt.Fprintf(tw, "[WARN] failed to get logs from pod %s: %v\n", pod.Name, err)
+						continue
+					}
+
+					sourceNode := pod.Spec.NodeName
+					report, err := ParseBenchmarkLogs(logs, config, "intra_node", sourceNode)
+					if err != nil {
+						fmt.Fprintf(tw, "[WARN] failed to parse logs from pod %s: %v\n", pod.Name, err)
+						continue
+					}
+
+					if len(report.Results) > 0 {
+						if err := CreateBenchmarkResultConfigMap(report, "intra-"+sourceNode); err != nil {
+							fmt.Fprintf(tw, "[WARN] failed to save intra-node results for %s: %v\n", sourceNode, err)
+						}
+					}
+				}
+
+				return nil
+			}
+
+			fmt.Fprintf(tw, "[INFO] intra-node benchmark progress: %d/%d pods completed\n", completedCount, len(pods.Items))
+			tw.Flush()
+			time.Sleep(5 * time.Second)
+		}
+	}
 }
 
 func CreateNewBenchmark(config BenchmarkConfig) error {
@@ -1003,7 +1245,7 @@ func CreateNewBenchmark(config BenchmarkConfig) error {
 	tw.Flush()
 	ListBenchmarksWithFilter(context.Background(), ListFilter{
 		Latest: true,
-		Mode: "host",
+		Mode:   "host",
 	})
 
 	// ========== POD NETWORK BENCHMARK ==========
@@ -1046,7 +1288,30 @@ func CreateNewBenchmark(config BenchmarkConfig) error {
 	tw.Flush()
 	ListBenchmarksWithFilter(context.Background(), ListFilter{
 		Latest: true,
-		Mode: "pod",
+		Mode:   "pod",
+	})
+
+	// ========== INTRA-NODE BENCHMARK ==========
+	fmt.Fprintf(tw, "[INFO] starting intra-node benchmark...\n")
+	tw.Flush()
+
+	if err := CreateIntraNodeBenchmarkPods(config); err != nil {
+		fmt.Fprintf(tw, "[ERROR] failed to create intra-node benchmark pods: %v\n", err)
+		tw.Flush()
+		return err
+	}
+
+	if err := WaitForIntraNodeBenchmarkCompletion(config, benchmarkTimeout); err != nil {
+		fmt.Fprintf(tw, "[ERROR] intra-node benchmark failed: %v\n", err)
+		tw.Flush()
+		return err
+	}
+
+	fmt.Fprintf(tw, "[INFO] intra-node benchmark completed\n")
+	tw.Flush()
+	ListBenchmarksWithFilter(context.Background(), ListFilter{
+		Latest: true,
+		Mode:   "intra",
 	})
 
 	fmt.Fprintf(tw, "[INFO] all benchmarks completed successfully\n")
@@ -1086,6 +1351,15 @@ func ReleaseBenchmarkResources() error {
 	if err := K3sClient.CoreV1().Pods(DEFAULT_NAMESPACE).Delete(ctx, IPERF_CLIENT_PODNETWORK_NAME, metav1.DeleteOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
 			fmt.Fprintf(tw, "[WARN] failed to delete pod '%s': %v\n", IPERF_CLIENT_PODNETWORK_NAME, err)
+		}
+	}
+
+	// Delete intra-node benchmark pods by label selector
+	if err := K3sClient.CoreV1().Pods(DEFAULT_NAMESPACE).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{
+		LabelSelector: "app=iperf-benchmark,mode=intra-node",
+	}); err != nil {
+		if !apierrors.IsNotFound(err) {
+			fmt.Fprintf(tw, "[WARN] failed to delete intra-node benchmark pods: %v\n", err)
 		}
 	}
 

@@ -12,6 +12,7 @@ type ConfigMapSetRow struct {
 type BenchmarkConfig struct {
 	NumberOfConnections int
 	DurationSeconds     int
+	ExcludeNodes        string // Comma-separated list of nodes to exclude from benchmarks
 }
 
 type IperfTestResult struct {

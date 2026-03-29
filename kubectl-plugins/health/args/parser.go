@@ -24,11 +24,13 @@ var BenchmarkParams *cli.App = &cli.App{
 			Flags: []cli.Flag{
 				&cli.IntFlag{Name: "conn", Value: 4, Usage: "Number of parallel iperf connections.", Aliases: []string{"parallel", "c"}},
 				&cli.IntFlag{Name: "duration", Value: 10, Usage: "Duration of the iperf test in seconds.", Aliases: []string{"d", "seconds"}},
+				&cli.StringFlag{Name: "exclude", Value: "metal-01.he-eu-hel1.misc.vacdst", Usage: "Comma-separated list of nodes to exclude from benchmarks.", Aliases: []string{"x", "skip"}},
 			},
 			Action: func(c *cli.Context) error {
 
 				CurrentConfig.NumberOfConnections = c.Int("conn")
 				CurrentConfig.DurationSeconds = c.Int("duration")
+				CurrentConfig.ExcludeNodes = c.String("exclude")
 				return k3sutils.CreateNewBenchmark(CurrentConfig)
 			},
 		},
@@ -41,7 +43,7 @@ var BenchmarkParams *cli.App = &cli.App{
 			Flags: []cli.Flag{
 				&cli.BoolFlag{Name: "latest", Usage: "Show only the latest result per destination node.", Aliases: []string{"L"}},
 				&cli.BoolFlag{Name: "today", Usage: "Show only today's benchmark results.", Aliases: []string{"t"}},
-				&cli.StringFlag{Name: "mode", Usage: "Filter by network mode: 'host' or 'pod'.", Aliases: []string{"m"}},
+				&cli.StringFlag{Name: "mode", Usage: "Filter by network mode: 'host', 'pod', or 'intra'.", Aliases: []string{"m"}},
 				&cli.StringFlag{Name: "node", Usage: "Filter by destination node name (partial match).", Aliases: []string{"n"}},
 				&cli.IntFlag{Name: "limit", Usage: "Maximum number of results to show.", Value: 0, Aliases: []string{"max"}},
 			},
