@@ -4,6 +4,28 @@ A Small kubectl plugin for iperf-based network benchmarking in the vaclab cluste
 
 ## Installation
 
+### Prerequisites: Install Krew
+
+If you don't have Krew installed:
+
+```bash
+(
+  set -x; cd "$(mktemp -d)" &&
+  OS="$(uname | tr '[:upper:]' '[:lower:]')" &&
+  ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')" &&
+  KREW="krew-${OS}_${ARCH}" &&
+  curl -fsSLO "https://github.com/kubernetes-sigs/krew/releases/latest/download/${KREW}.tar.gz" &&
+  tar zxvf "${KREW}.tar.gz" &&
+  ./"${KREW}" install krew
+)
+```
+
+Add Krew to your PATH (add to `~/.bashrc` or `~/.zshrc`):
+
+```bash
+export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
+```
+
 ### Install via Krew (Recommended)
 
 First, add the private plugin index:
@@ -22,6 +44,14 @@ To update the plugin:
 
 ```bash
 kubectl krew upgrade health
+```
+
+### Install from Branch (Testing)
+
+To quicly test the plugin from the PR branch:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vacp2p/vaclab-k8s-plugins/feat/kubectl-health-krew/plugins/health.yaml -o /tmp/health.yaml && kubectl krew install --manifest=/tmp/health.yaml
 ```
 
 ### Copy the binary from current repo
