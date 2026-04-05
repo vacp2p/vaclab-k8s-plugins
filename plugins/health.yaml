@@ -1,0 +1,55 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: health
+spec:
+  version: "v0.1.0"
+  homepage: https://github.com/vacp2p/vaclab-k8s-plugins
+  shortDescription: Network health benchmarking for Kubernetes clusters
+  description: |
+    kubectl-health is a plugin for running iperf-based network benchmarks
+    on Kubernetes clusters. It supports multiple benchmark modes:
+    - host_network: Benchmark using host network
+    - pod_network: Benchmark using pod network  
+    - intra_node: Benchmark within the same node
+    
+    Features:
+    - Node exclusion support
+    - Configurable connections and duration
+    - Result collection and display
+  platforms:
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    uri: https://github.com/vacp2p/vaclab-k8s-plugins/releases/download/kubectl-health-v0.1.0/kubectl-health_linux_amd64.tar.gz
+    sha256: "13cfdd398db7c8539bf562af08b3cc4330a897c77bf5a5effedcc5185812cb2c"
+    bin: kubectl-health
+  - selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+    uri: https://github.com/vacp2p/vaclab-k8s-plugins/releases/download/kubectl-health-v0.1.0/kubectl-health_linux_arm64.tar.gz
+    sha256: "05dd7a37118460a1e8c85604a316dc0a02dc9a2400a3dc9178feade9af00e259"
+    bin: kubectl-health
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    uri: https://github.com/vacp2p/vaclab-k8s-plugins/releases/download/kubectl-health-v0.1.0/kubectl-health_darwin_amd64.tar.gz
+    sha256: "7bf179d619e0289603fa27a318085edd8f3a9c2cd1c581b436e2dea8d25fb739"
+    bin: kubectl-health
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: arm64
+    uri: https://github.com/vacp2p/vaclab-k8s-plugins/releases/download/kubectl-health-v0.1.0/kubectl-health_darwin_arm64.tar.gz
+    sha256: "24a34be09df20c19d64a59d9980058faad884b1ac936f3381993033946f02e9f"
+    bin: kubectl-health
+  - selector:
+      matchLabels:
+        os: windows
+        arch: amd64
+    uri: https://github.com/vacp2p/vaclab-k8s-plugins/releases/download/kubectl-health-v0.1.0/kubectl-health_windows_amd64.zip
+    sha256: "58ea7a85ea9ae02c400c4ba332b8a9616602272418ef1008c81352881bdf1460"
+    bin: kubectl-health.exe
